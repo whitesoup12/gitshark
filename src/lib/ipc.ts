@@ -1,0 +1,884 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type {
+  RepoMetadata,
+  TerminalDataPayload,
+  TerminalExitPayload,
+  RepoHooksInfo,
+  WorktreeItem,
+  RemoteSyncStatus,
+  CloneOptions,
+  CloneProgressPayload,
+  RepoBranches,
+  StashItem,
+  CommitDetails,
+} from "@/types";
+
+export const isTauriEnvironment = (): boolean => {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+};
+
+/**
+ * Open native directory picker to select a local Git repository folder
+ */
+export async function pickRepositoryDirectory(): Promise<string | null> {
+  try {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: "Select Git Repository Directory",
+    });
+
+    if (Array.isArray(selected)) {
+      return selected[0] ?? null;
+    }
+    return selected;
+  } catch (err) {
+    if (!isTauriEnvironment()) {
+      const promptPath = window.prompt("Enter absolute path to Git repository folder:");
+      return promptPath && promptPath.trim().length > 0 ? promptPath.trim() : null;
+    }
+    console.error("Failed to open native file explorer dialog:", err);
+    return null;
+  }
+}
+
+/**
+ * Open repository via local filesystem path, creating a RepoSession in Rust
+ */
+export async function openRepositoryIpc(path: string): Promise<RepoMetadata> {
+  if (!isTauriEnvironment()) {
+    // Mock for browser testing
+    console.warn("Running outside Tauri environment. Using simulated RepoMetadata.");
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      id: "simulated-" + Math.random().toString(36).substring(2, 9),
+      name: path.split(/[/\\]/).filter(Boolean).pop() || "local-repo",
+      path: path,
+      current_branch: "main",
+      is_detached: false,
+      head_commit_hash: "a1b2c3d4e5f67890123456789abcdef01234567",
+      head_commit_summary: "feat: scaffold workspace and PTY streaming IPC",
+      is_dirty: true,
+      staged_count: 2,
+      unstaged_count: 1,
+      untracked_count: 0,
+    };
+  }
+
+  return await invoke<RepoMetadata>("open_repository", { path });
+}
+
+/**
+ * Close repository and drop RepoSession from memory
+ */
+export async function closeRepositoryIpc(id: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>("close_repository", { id });
+}
+
+/**
+ * Refresh and query the latest metadata for an open repository session
+ */
+export async function getRepositoryMetadataIpc(id: string): Promise<RepoMetadata> {
+  if (!isTauriEnvironment()) {
+    throw new Error("Tauri environment not detected");
+  }
+  return await invoke<RepoMetadata>("get_repository_metadata", { id });
+}
+
+/**
+ * Spawn a native process inside portable-pty scoped to the repository working directory
+ */
+export async function executePtyCommandIpc(
+  id: string,
+  command: string,
+  args: string[] = [],
+  cols: number = 80,
+  rows: number = 24
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Executing command: ${command} ${args.join(" ")}`);
+    return;
+  }
+
+  return await invoke<void>("execute_pty_command", {
+    id,
+    command,
+    args,
+    cols,
+    rows,
+  });
+}
+
+/**
+ * Send keystrokes / stdin directly into the running PTY process
+ */
+export async function writePtyInputIpc(id: string, data: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>("write_pty_input", { id, data });
+}
+
+/**
+ * Notify PTY of terminal resize
+ */
+export async function resizePtyIpc(id: string, cols: number, rows: number): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>("resize_pty", { id, cols, rows });
+}
+
+/**
+ * Kill active PTY process
+ */
+export async function killPtyIpc(id: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>("kill_pty", { id });
+}
+
+/**
+ * Listen to terminal chunk stream for a specific repository session
+ */
+export async function listenToTerminalData(
+  repoId: string,
+  onData: (data: string) => void
+): Promise<UnlistenFn> {
+  if (!isTauriEnvironment()) {
+    return () => {};
+  }
+  return await listen<TerminalDataPayload>(`repo:${repoId}:terminal_data`, (event) => {
+    onData(event.payload.data);
+  });
+}
+
+/**
+ * Listen to terminal process exit notification
+ */
+export async function listenToTerminalExit(
+  repoId: string,
+  onExit: (payload: TerminalExitPayload) => void
+): Promise<UnlistenFn> {
+  if (!isTauriEnvironment()) {
+    return () => {};
+  }
+  return await listen<TerminalExitPayload>(`repo:${repoId}:terminal_exit`, (event) => {
+    onExit(event.payload);
+  });
+}
+
+/**
+ * Fetch topological commit DAG graph with precomputed lane allocations & edge vectors
+ */
+export async function getCommitGraphIpc(
+  repoId: string,
+  limit: number = 1000,
+  skip: number = 0
+): Promise<import("@/types").CommitNode[]> {
+  if (!isTauriEnvironment()) {
+    return generateMockCommitGraph(limit);
+  }
+
+  return await invoke<import("@/types").CommitNode[]>("get_commit_graph", {
+    repoId,
+    limit,
+    skip,
+  });
+}
+
+/**
+ * Generates an authentic simulated multi-branch commit DAG for browser preview
+ */
+function generateMockCommitGraph(count: number): import("@/types").CommitNode[] {
+  const nodes: import("@/types").CommitNode[] = [];
+  const authors = ["Elena Vance", "Marcus Bell", "Aria Stark", "Devin Cole"];
+  const messages = [
+    "feat(graph): implement virtualized canvas rendering engine",
+    "fix(ipc): handle PTY broken pipe on process termination",
+    "Merge branch 'feature/canvas-dag' into main",
+    "perf: optimize revwalk topological lane calculation in Rust",
+    "docs: update architecture constraints and milestone guide",
+    "feat(tabs): tab-isolated repository state container",
+    "Merge branch 'fix/xterm-resize' into main",
+    "fix(terminal): debounce PTY resize observer events",
+    "style: modernize dark ocean theme palette",
+    "chore(deps): update git2-rs to v0.20 with vendored libgit2",
+    "Merge pull request #42 from gitshark/feature/bezier-curves",
+    "feat(ui): smooth cubic bezier curve routing for merge lines",
+    "refactor: extract workspace shell into modular subviews",
+    "feat: add git ref badges for HEAD, local and remote branches",
+    "initial commit: GitShark foundation and Tauri v2 scaffolding",
+  ];
+
+  const now = Math.floor(Date.now() / 1000);
+
+  // Synthesize realistic lanes and merges
+  for (let i = 0; i < Math.min(count, 45); i++) {
+    const isMerge = i === 2 || i === 6 || i === 10 || i === 18 || i === 25;
+    const isBranch = i === 3 || i === 7 || i === 11 || i === 19 || i === 26;
+    const lane = isBranch ? 1 : isMerge ? 0 : i % 7 === 4 ? 2 : 0;
+    const colorIndex = lane % 8;
+
+    const edges: import("@/types").Edge[] = [];
+    const parentRow = i + 1;
+
+    if (i < 44) {
+      if (isMerge) {
+        // Primary parent on lane 0
+        edges.push({
+          from_lane: 0,
+          to_lane: 0,
+          to_row: parentRow,
+          is_merge: false,
+          color_index: 0,
+        });
+        // Secondary parent merged from lane 1
+        edges.push({
+          from_lane: 0,
+          to_lane: 1,
+          to_row: parentRow + 1,
+          is_merge: true,
+          color_index: 1,
+        });
+      } else if (isBranch) {
+        // Branching or continuing in lane 1
+        edges.push({
+          from_lane: 1,
+          to_lane: i === 5 || i === 9 || i === 13 ? 0 : 1,
+          to_row: parentRow,
+          is_merge: false,
+          color_index: 1,
+        });
+      } else {
+        edges.push({
+          from_lane: lane,
+          to_lane: lane,
+          to_row: parentRow,
+          is_merge: false,
+          color_index: colorIndex,
+        });
+      }
+    }
+
+    const refs: import("@/types").GitRefBadge[] = [];
+    if (i === 0) {
+      refs.push({ name: "HEAD", shorthand: "HEAD", kind: "head", is_head: true });
+      refs.push({ name: "refs/heads/main", shorthand: "main", kind: "local_branch", is_head: false });
+      refs.push({ name: "refs/remotes/origin/main", shorthand: "origin/main", kind: "remote_branch", is_head: false });
+    } else if (i === 1) {
+      refs.push({ name: "refs/heads/feature/canvas-dag", shorthand: "feature/canvas-dag", kind: "local_branch", is_head: false });
+    } else if (i === 5) {
+      refs.push({ name: "refs/tags/v0.1.0", shorthand: "v0.1.0", kind: "tag", is_head: false });
+    } else if (i === 12) {
+      refs.push({ name: "refs/remotes/origin/develop", shorthand: "origin/develop", kind: "remote_branch", is_head: false });
+    }
+
+    const hash = Array.from({ length: 40 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join("");
+
+    nodes.push({
+      id: hash,
+      summary: messages[i % messages.length],
+      author: authors[i % authors.length],
+      author_email: `${authors[i % authors.length].toLowerCase().replace(" ", ".")}@gitshark.dev`,
+      timestamp: now - i * 3600 * 4,
+      hash,
+      parents: i < 44 ? [Array.from({ length: 40 }, () => "f").join("")] : [],
+      lane,
+      color_index: colorIndex,
+      edges,
+      refs,
+    });
+  }
+
+  return nodes;
+}
+
+/**
+ * Fetch categorized working tree status (staged, unstaged, untracked)
+ */
+export async function getWorkingTreeStatusIpc(
+  repoId: string
+): Promise<import("@/types").WorkingTreeStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      staged: [
+        { path: "src/lib/ipc.ts", status: "modified", staged: true },
+        { path: "src/types/diff.ts", status: "new", staged: true },
+      ],
+      unstaged: [
+        { path: "src-tauri/src/git.rs", status: "modified", staged: false },
+        { path: "src-tauri/src/commands.rs", status: "modified", staged: false },
+      ],
+      untracked: [
+        { path: "src/components/diff/DiffViewer.tsx", status: "untracked", staged: false },
+      ],
+    };
+  }
+
+  return await invoke<import("@/types").WorkingTreeStatus>("get_working_tree_status", {
+    repoId,
+  });
+}
+
+/**
+ * Stage a specific file in the index
+ */
+export async function stageFileIpc(repoId: string, path: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Stage file: ${path}`);
+    return;
+  }
+  return await invoke<void>("stage_file", { repoId, path });
+}
+
+/**
+ * Unstage a specific file from the index back to HEAD
+ */
+export async function unstageFileIpc(repoId: string, path: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Unstage file: ${path}`);
+    return;
+  }
+  return await invoke<void>("unstage_file", { repoId, path });
+}
+
+/**
+ * Stage all modified, deleted, and untracked files
+ */
+export async function stageAllFilesIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Stage all files`);
+    return;
+  }
+  return await invoke<void>("stage_all_files", { repoId });
+}
+
+/**
+ * Unstage all files in the index
+ */
+export async function unstageAllFilesIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Unstage all files`);
+    return;
+  }
+  return await invoke<void>("unstage_all_files", { repoId });
+}
+
+/**
+ * Stage an individual diff hunk patch directly to the index
+ */
+export async function stageHunkIpc(repoId: string, patch: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Stage hunk patch:\n${patch}`);
+    return;
+  }
+  return await invoke<void>("stage_hunk", { repoId, patch });
+}
+
+/**
+ * Discard working tree changes for a file (checkout from HEAD or delete untracked)
+ */
+export async function discardFileChangesIpc(repoId: string, path: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Discard changes for: ${path}`);
+    return;
+  }
+  return await invoke<void>("discard_file_changes", { repoId, path });
+}
+
+/**
+ * Fetch line-by-line structured diff data for a file
+ */
+export async function getFileDiffIpc(
+  repoId: string,
+  path: string,
+  staged: boolean
+): Promise<import("@/types").FileDiff> {
+  if (!isTauriEnvironment()) {
+    return {
+      old_path: path,
+      new_path: path,
+      is_binary: false,
+      is_new: false,
+      is_deleted: false,
+      total_additions: 4,
+      total_deletions: 2,
+      hunks: [
+        {
+          header: "@@ -14,6 +14,8 @@",
+          old_start: 14,
+          old_lines: 6,
+          new_start: 14,
+          new_lines: 8,
+          patch: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -14,6 +14,8 @@\n export const ROW_HEIGHT = 28;\n-export const LANE_WIDTH = 14;\n+export const LANE_WIDTH = 16;\n+export const NODE_RADIUS = 4.5;\n export const GRAPH_PADDING_X = 20;\n`,
+          lines: [
+            { origin: " ", old_lineno: 14, new_lineno: 14, content: "export const ROW_HEIGHT = 28;" },
+            { origin: "-", old_lineno: 15, new_lineno: null, content: "export const LANE_WIDTH = 14;" },
+            { origin: "+", old_lineno: null, new_lineno: 15, content: "export const LANE_WIDTH = 16;" },
+            { origin: "+", old_lineno: null, new_lineno: 16, content: "export const NODE_RADIUS = 4.5;" },
+            { origin: " ", old_lineno: 16, new_lineno: 17, content: "export const GRAPH_PADDING_X = 20;" },
+          ],
+        },
+      ],
+    };
+  }
+
+  return await invoke<import("@/types").FileDiff>("get_file_diff", {
+    repoId,
+    path,
+    staged,
+  });
+}
+
+/**
+ * Listen to filesystem watcher auto-refresh events
+ */
+export async function listenToStatusChanged(
+  repoId: string,
+  onStatusChanged: () => void
+): Promise<UnlistenFn> {
+  if (!isTauriEnvironment()) {
+    return () => {};
+  }
+  return await listen(`repo:${repoId}:status_changed`, () => {
+    onStatusChanged();
+  });
+}
+
+/**
+ * Execute native git commit in PTY streaming to active tab xterm
+ */
+export async function executeGitCommitIpc(
+  repoId: string,
+  message: string,
+  amend: boolean = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git commit -m "${message}" (amend=${amend})`);
+    return;
+  }
+  return await invoke<void>("execute_git_commit", {
+    repoId,
+    message,
+    amend,
+  });
+}
+
+/**
+ * Execute native git push in PTY streaming to active tab xterm
+ */
+export async function executeGitPushIpc(
+  repoId: string,
+  remote?: string,
+  branch?: string,
+  force: boolean = false,
+  setUpstream: boolean = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force}, setUpstream=${setUpstream})`);
+    return;
+  }
+  return await invoke<void>("execute_git_push", {
+    repoId,
+    remote,
+    branch,
+    force,
+    setUpstream,
+  });
+}
+
+/**
+ * Send SIGINT/kill to active PTY child process (e.g. aborting long-running hook)
+ */
+export async function cancelActiveProcessIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] cancel_active_process for repo ${repoId}`);
+    return;
+  }
+  return await invoke<void>("cancel_active_process", { repoId });
+}
+
+/**
+ * Inspect Git client hooks in .git/hooks or core.hooksPath
+ */
+export async function getRepoHooksIpc(repoId: string): Promise<RepoHooksInfo> {
+  if (!isTauriEnvironment()) {
+    return {
+      hooks_dir: ".git/hooks",
+      has_pre_commit: true,
+      has_commit_msg: false,
+      has_pre_push: false,
+      active_hooks: [
+        {
+          name: "pre-commit",
+          path: ".git/hooks/pre-commit",
+          is_executable: true,
+        },
+      ],
+    };
+  }
+  return await invoke<RepoHooksInfo>("get_repo_hooks", { repoId });
+}
+
+/**
+ * List linked worktrees for a repository session
+ */
+export async function listWorktreesIpc(repoId: string): Promise<WorktreeItem[]> {
+  if (!isTauriEnvironment()) {
+    return [
+      {
+        path: "/path/to/worktree/main",
+        head: "a1b2c3d4",
+        branch: "main",
+        is_detached: false,
+        is_locked: false,
+        lock_reason: null,
+        is_prunable: false,
+        is_main: true,
+      },
+      {
+        path: "/path/to/worktree/feature-branch",
+        head: "e5f6g7h8",
+        branch: "feature/worktree-ui",
+        is_detached: false,
+        is_locked: false,
+        lock_reason: null,
+        is_prunable: false,
+        is_main: false,
+      },
+    ];
+  }
+  return await invoke<WorktreeItem[]>("list_worktrees", { repoId });
+}
+
+/**
+ * Add a new linked worktree
+ */
+export async function addWorktreeIpc(
+  repoId: string,
+  path: string,
+  branch: string,
+  newBranch: boolean = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] add_worktree: ${path} (${branch})`);
+    return;
+  }
+  return await invoke<void>("add_worktree", {
+    repoId,
+    path,
+    branch,
+    newBranch,
+  });
+}
+
+/**
+ * Remove a linked worktree
+ */
+export async function removeWorktreeIpc(
+  repoId: string,
+  path: string,
+  force: boolean = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] remove_worktree: ${path} (force=${force})`);
+    return;
+  }
+  return await invoke<void>("remove_worktree", {
+    repoId,
+    path,
+    force,
+  });
+}
+
+/**
+ * Calculate ahead/behind commit counts relative to upstream tracking branch
+ */
+export async function getRemoteSyncStatusIpc(
+  repoId: string
+): Promise<RemoteSyncStatus> {
+  if (!isTauriEnvironment()) {
+    return {
+      current_branch: "main",
+      upstream_branch: "origin/main",
+      ahead: 1,
+      behind: 0,
+      has_upstream: true,
+    };
+  }
+  return await invoke<RemoteSyncStatus>("get_remote_sync_status", { repoId });
+}
+
+/**
+ * Execute native git pull in PTY
+ */
+export async function executeGitPullIpc(
+  repoId: string,
+  remote?: string,
+  branch?: string,
+  rebase: boolean = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git pull ${remote || ""} ${branch || ""} (rebase=${rebase})`);
+    return;
+  }
+  return await invoke<void>("execute_git_pull", {
+    repoId,
+    remote,
+    branch,
+    rebase,
+  });
+}
+
+/**
+ * Start streaming git clone in the background
+ */
+export async function startCloneRepositoryIpc(
+  cloneId: string,
+  options: CloneOptions
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] clone ${options.url} -> ${options.destination}`);
+    return;
+  }
+  return await invoke<void>("start_clone_repository", {
+    cloneId,
+    options,
+  });
+}
+
+/**
+ * Cancel an active clone operation
+ */
+export async function cancelCloneIpc(cloneId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] cancel_clone: ${cloneId}`);
+    return;
+  }
+  return await invoke<void>("cancel_clone", { cloneId });
+}
+
+/**
+ * Listen to real-time git clone progress events
+ */
+export async function listenToCloneProgress(
+  cloneId: string,
+  onProgress: (payload: CloneProgressPayload) => void
+): Promise<UnlistenFn> {
+  if (!isTauriEnvironment()) {
+    return () => {};
+  }
+  return await listen<CloneProgressPayload>(`clone_progress:${cloneId}`, (event) => {
+    onProgress(event.payload);
+  });
+}
+
+/**
+ * Query all local and remote branches in the repository
+ */
+export async function getRepoBranchesIpc(repoId: string): Promise<RepoBranches> {
+  if (!isTauriEnvironment()) {
+    return {
+      local: [
+        {
+          name: "refs/heads/main",
+          shorthand: "main",
+          is_head: true,
+          is_remote: false,
+          upstream: "origin/main",
+          target_commit: "mock-hash",
+        },
+      ],
+      remote: [
+        {
+          name: "refs/remotes/origin/main",
+          shorthand: "origin/main",
+          is_head: false,
+          is_remote: true,
+          upstream: null,
+          target_commit: "mock-hash",
+        },
+      ],
+    };
+  }
+
+  return await invoke<RepoBranches>("get_repo_branches", { repoId });
+}
+
+/**
+ * Checkout target branch (local or remote tracking)
+ */
+export async function checkoutBranchIpc(repoId: string, branchName: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] checkout_branch: ${branchName} in ${repoId}`);
+    return;
+  }
+
+  return await invoke<void>("checkout_branch", { repoId, branchName });
+}
+
+/**
+ * Create a new branch
+ */
+export async function createBranchIpc(
+  repoId: string,
+  branchName: string,
+  targetCommit?: string | null,
+  checkout = true
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] create_branch: ${branchName} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("create_branch", {
+    repoId,
+    branchName,
+    targetCommit: targetCommit || null,
+    checkout,
+  });
+}
+
+/**
+ * Delete a branch
+ */
+export async function deleteBranchIpc(
+  repoId: string,
+  branchName: string,
+  isRemote = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] delete_branch: ${branchName} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("delete_branch", { repoId, branchName, isRemote });
+}
+
+/**
+ * List repository stashes
+ */
+export async function listStashesIpc(repoId: string): Promise<StashItem[]> {
+  if (!isTauriEnvironment()) {
+    return [
+      {
+        index: 0,
+        message: "WIP on main: preliminary styling tweaks",
+        commit_id: "stash-hash-0",
+      },
+    ];
+  }
+  return await invoke<StashItem[]>("list_stashes", { repoId });
+}
+
+/**
+ * Create a git stash
+ */
+export async function createStashIpc(
+  repoId: string,
+  message?: string | null,
+  includeUntracked = true
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] create_stash: ${message} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("create_stash", {
+    repoId,
+    message: message || null,
+    includeUntracked,
+  });
+}
+
+/**
+ * Apply or pop a stash
+ */
+export async function applyStashIpc(
+  repoId: string,
+  index: number,
+  pop = false
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] apply_stash: #${index} (pop: ${pop}) in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("apply_stash", { repoId, index, pop });
+}
+
+/**
+ * Drop a stash
+ */
+export async function dropStashIpc(repoId: string, index: number): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] drop_stash: #${index} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("drop_stash", { repoId, index });
+}
+
+/**
+ * Get commit details and changed files
+ */
+export async function getCommitDetailsIpc(
+  repoId: string,
+  commitSha: string
+): Promise<CommitDetails> {
+  if (!isTauriEnvironment()) {
+    return {
+      hash: commitSha,
+      summary: "Mock commit summary for browser preview",
+      body: "Mock details about this commit",
+      author_name: "Mock Author",
+      author_email: "author@gitshark.dev",
+      timestamp: Math.floor(Date.now() / 1000) - 3600,
+      parent_hashes: ["mock-parent-1"],
+      files: [
+        {
+          path: "src/components/graph/CommitGraphCanvas.tsx",
+          status: "modified",
+          additions: 14,
+          deletions: 3,
+        },
+        {
+          path: "src-tauri/src/git.rs",
+          status: "modified",
+          additions: 42,
+          deletions: 8,
+        },
+      ],
+      total_additions: 56,
+      total_deletions: 11,
+    };
+  }
+  return await invoke<CommitDetails>("get_commit_details", { repoId, commitSha });
+}
+
+/**
+ * Get structured FileDiff for a file in a historical commit
+ */
+export async function getCommitFileDiffIpc(
+  repoId: string,
+  commitSha: string,
+  filePath: string
+): Promise<import("@/types").FileDiffData> {
+  if (!isTauriEnvironment()) {
+    return {
+      old_path: filePath,
+      new_path: filePath,
+      is_binary: false,
+      is_new: false,
+      is_deleted: false,
+      hunks: [],
+      total_additions: 0,
+      total_deletions: 0,
+    };
+  }
+  return await invoke<import("@/types").FileDiffData>("get_commit_file_diff", {
+    repoId,
+    commitSha,
+    filePath,
+  });
+}
+
+
+
+

@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070c18"/>
+      <stop offset="50%" stop-color="#0a1222"/>
+      <stop offset="100%" stop-color="#050811"/>
+    </linearGradient>
+
+    <radialGradient id="oceanGlow" cx="50%" cy="46%" r="55%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.32"/>
+      <stop offset="45%" stop-color="#0369a1" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#070c18" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Shark Body Metallic / Cyan Gradient -->
+    <linearGradient id="sharkDorsal" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="35%" stop-color="#0284c7"/>
+      <stop offset="85%" stop-color="#034870"/>
+      <stop offset="100%" stop-color="#022740"/>
+    </linearGradient>
+
+    <linearGradient id="sharkFin" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="40%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+
+    <linearGradient id="sharkBelly" x1="0%" y1="30%" x2="100%" y2="70%">
+      <stop offset="0%" stop-color="#e0f2fe" stop-opacity="0.95"/>
+      <stop offset="30%" stop-color="#bae6fd" stop-opacity="0.8"/>
+      <stop offset="70%" stop-color="#38bdf8" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.15"/>
+    </linearGradient>
+
+    <!-- Glowing DAG Commit Paths -->
+    <linearGradient id="dagBranchA" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="60%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+
+    <linearGradient id="dagBranchB" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+
+    <linearGradient id="dagBranchC" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#f43f5e"/>
+    </linearGradient>
+
+    <!-- Filters -->
+    <filter id="neonHalo" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0284c7" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- App Squircle Background -->
+  <rect width="512" height="512" rx="116" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="2.5"/>
+
+  <!-- Subtle Radial Deep-Sea Light Core -->
+  <circle cx="256" cy="245" r="215" fill="url(#oceanGlow)"/>
+
+  <!-- Background Decorative Grid / Tech Lines -->
+  <g opacity="0.15" stroke="#38bdf8" stroke-width="1" stroke-dasharray="4 6">
+    <line x1="80" y1="256" x2="432" y2="256"/>
+    <line x1="256" y1="80" x2="256" y2="432"/>
+    <circle cx="256" cy="256" r="160" fill="none"/>
+  </g>
+
+  <!-- MAIN SHARK SILHOUETTE & ANATOMY -->
+  <g filter="url(#dropShadow)">
+    <!-- Dorsal Fin (Bold, hydrodynamic, cutting up) -->
+    <path d="M 230 205 C 248 165, 275 110, 305 92 C 309 89, 314 93, 313 98 C 308 135, 296 178, 312 215 Z"
+          fill="url(#sharkFin)" stroke="#7dd3fc" stroke-width="1.5" stroke-linejoin="round"/>
+
+    <!-- Pectoral Fin (Sweeping lower wing) -->
+    <path d="M 185 285 C 175 330, 160 380, 195 410 C 200 414, 207 410, 208 404 C 218 365, 238 325, 252 295 Z"
+          fill="#034870" stroke="#0284c7" stroke-width="1.5" stroke-linejoin="round"/>
+
+    <!-- Main Shark Torpedo Body (Upper Dark/Blue) -->
+    <path d="M 82 254 
+             C 105 208, 168 180, 240 190 
+             C 285 196, 340 215, 388 238 
+             C 410 248, 435 240, 448 222
+             C 445 250, 430 268, 412 278
+             C 432 292, 446 312, 448 335
+             C 432 318, 405 310, 380 305
+             C 325 295, 265 315, 215 318
+             C 152 322, 108 290, 82 254 Z"
+          fill="url(#sharkDorsal)" stroke="#38bdf8" stroke-width="2" stroke-linejoin="round"/>
+
+    <!-- Lower Belly / Counter-shading Highlight (Smooth sleek silver-cyan) -->
+    <path d="M 82 254 
+             C 112 278, 155 312, 225 308
+             C 275 305, 325 288, 380 305
+             C 345 285, 295 272, 240 272
+             C 170 272, 118 250, 82 254 Z"
+          fill="url(#sharkBelly)"/>
+
+    <!-- Stylized Shark Eye (Aggressive Predator Slit with Cyan Glint) -->
+    <path d="M 128 234 Q 140 228 152 233 Q 138 240 128 234 Z" fill="#030712"/>
+    <polygon points="132,233 148,231 144,235 134,235" fill="#38bdf8" filter="url(#neonHalo)"/>
+    <circle cx="140" cy="233" r="1.5" fill="#ffffff"/>
+
+    <!-- Gill Slits (3 dynamic curved neon vents representing git diff/status) -->
+    <g stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round" opacity="0.85">
+      <path d="M 172 242 Q 168 255 174 268"/>
+      <path d="M 183 240 Q 179 256 186 270"/>
+      <path d="M 194 238 Q 190 257 198 272"/>
+    </g>
+
+    <!-- Facet Contour Highlight (Stealth / Geometric Sheen) -->
+    <path d="M 86 254 C 150 215, 235 210, 312 215" 
+          fill="none" stroke="#e0f2fe" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+  </g>
+
+  <!-- INTEGRATED GIT COMMIT DAG GRAPH (The soul of GitShark) -->
+  <g filter="url(#neonHalo)">
+    <!-- Branch Path 1: Mainline commit highway -->
+    <path d="M 118 254 C 160 254, 185 242, 230 242 C 275 242, 305 262, 350 262 C 378 262, 400 270, 420 275"
+          fill="none" stroke="url(#dagBranchA)" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Branch Path 2: Dorsal Fin Feature Branch -->
+    <path d="M 230 242 C 245 210, 270 160, 298 118"
+          fill="none" stroke="url(#dagBranchB)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="none"/>
+
+    <!-- Branch Path 3: Pectoral Merge Branch -->
+    <path d="M 230 242 C 215 280, 195 325, 198 380 C 205 345, 240 310, 280 295 C 315 282, 335 272, 350 262"
+          fill="none" stroke="url(#dagBranchC)" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- Commit Node 1: Root / Origin (Snout) -->
+    <circle cx="118" cy="254" r="6" fill="#070d18" stroke="#34d399" stroke-width="2.5"/>
+    <circle cx="118" cy="254" r="2.5" fill="#34d399"/>
+
+    <!-- Commit Node 2: Fork / Branch Point (Core) -->
+    <circle cx="230" cy="242" r="7.5" fill="#070d18" stroke="#38bdf8" stroke-width="3"/>
+    <circle cx="230" cy="242" r="3" fill="#ffffff"/>
+
+    <!-- Commit Node 3: Dorsal Apex (Feature HEAD) -->
+    <circle cx="298" cy="118" r="6" fill="#070d18" stroke="#a78bfa" stroke-width="2.5"/>
+    <circle cx="298" cy="118" r="2.5" fill="#c084fc"/>
+
+    <!-- Commit Node 4: Pectoral Worktree / Stash Node -->
+    <circle cx="198" cy="380" r="5" fill="#070d18" stroke="#f43f5e" stroke-width="2"/>
+    <circle cx="198" cy="380" r="2" fill="#fb7185"/>
+
+    <!-- Commit Node 5: Fast-Forward / Merge Target (Fluke) -->
+    <circle cx="350" cy="262" r="6.5" fill="#070d18" stroke="#38bdf8" stroke-width="2.5"/>
+    <circle cx="350" cy="262" r="2.5" fill="#38bdf8"/>
+
+    <!-- Commit Node 6: Release HEAD (Caudal Tip) -->
+    <circle cx="420" cy="275" r="5" fill="#070d18" stroke="#34d399" stroke-width="2"/>
+    <circle cx="420" cy="275" r="2" fill="#34d399"/>
+  </g>
+
+  <!-- Glowing Pulse Halo on Primary Fork Node -->
+  <circle cx="230" cy="242" r="13" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.4" stroke-dasharray="2 3"/>
+</svg>

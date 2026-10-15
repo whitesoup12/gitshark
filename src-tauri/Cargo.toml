@@ -1,0 +1,28 @@
+[package]
+name = "gitshark"
+version = "0.1.0"
+description = "GitShark: Fast desktop Git client built with Tauri v2 and Rust"
+authors = ["GitShark Team"]
+edition = "2021"
+
+[lib]
+name = "gitshark_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.2", features = [] }
+tauri-plugin-dialog = "2.2"
+tauri-plugin-shell = "2.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+git2 = { version = "0.20", features = ["vendored-libgit2"] }
+portable-pty = "0.8"
+parking_lot = "0.12"
+tokio = { version = "1.40", features = ["full"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+thiserror = "2.0"
+log = "0.4"
+notify = "6.1"
