@@ -215,6 +215,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
       if (success) {
         setStashMessage("");
         setIsStashing(false);
+        fetchStashes(tab.id);
         onRefresh();
       }
     } finally {

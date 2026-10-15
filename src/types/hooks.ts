@@ -27,7 +27,7 @@ export interface HookExecutionState {
   stage: HookStage;
   status: HookStatus;
   elapsedSeconds: number;
-  lastCommand: "commit" | "push" | null;
+  lastCommand: "commit" | "push" | "pull" | null;
   lastMessage?: string;
   lastAmend?: boolean;
   exitCode?: number | null;

@@ -378,89 +378,92 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }, 100);
     activeTimers.set(tabId, timer);
 
-    return new Promise<boolean>((resolve) => {
+    return new Promise<boolean>(async (resolve) => {
       let isDone = false;
+      let unlistenDataFn: (() => void) | null = null;
+      let unlistenExitFn: (() => void) | null = null;
 
-      const cleanup = (unlistenExit?: () => void, unlistenData?: () => void) => {
+      const cleanup = () => {
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
         }
-        if (unlistenExit) unlistenExit();
-        if (unlistenData) unlistenData();
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+        if (unlistenDataFn) {
+          unlistenDataFn();
+          unlistenDataFn = null;
+        }
       };
 
-      let unlistenDataFn: (() => void) | null = null;
-      let unlistenExitFn: (() => void) | null = null;
-
-      listenToTerminalData(repoId, (chunk) => {
-        if (chunk.toLowerCase().includes("commit-msg")) {
-          const cur = get().tabs.find((t) => t.id === tabId);
-          if (cur?.hookState && cur.hookState.status === "running") {
-            get().updateTab(tabId, {
-              hookState: { ...cur.hookState, stage: "commit-msg" },
-            });
-          }
-        }
-      }).then((fn) => {
-        unlistenDataFn = fn;
-      });
-
-      listenToTerminalExit(repoId, async (payload) => {
-        if (isDone) return;
-        isDone = true;
-        cleanup(unlistenExitFn ?? undefined, unlistenDataFn ?? undefined);
-
-        const totalElapsed = (Date.now() - startTime) / 1000;
-        const resolvedStage: HookStage = hasPreCommit ? "pre-commit" : "committing";
-
-        if (payload.success) {
-          get().updateTab(tabId, {
-            hookState: {
-              stage: resolvedStage,
-              status: "passed",
-              elapsedSeconds: Number(totalElapsed.toFixed(1)),
-              lastCommand: "commit",
-              lastMessage: message,
-              lastAmend: amend,
-              exitCode: 0,
-            },
-          });
-
-          await get().refreshTabMetadata(tabId);
-
-          setTimeout(() => {
-            const checkTab = get().tabs.find((t) => t.id === tabId);
-            if (checkTab?.hookState?.status === "passed") {
-              get().updateTab(tabId, { terminalOpen: false });
+      try {
+        unlistenDataFn = await listenToTerminalData(repoId, (chunk) => {
+          if (chunk.toLowerCase().includes("commit-msg")) {
+            const cur = get().tabs.find((t) => t.id === tabId);
+            if (cur?.hookState && cur.hookState.status === "running") {
+              get().updateTab(tabId, {
+                hookState: { ...cur.hookState, stage: "commit-msg" },
+              });
             }
-          }, 1500);
+          }
+        });
 
-          resolve(true);
-        } else {
-          get().updateTab(tabId, {
-            terminalOpen: true,
-            hookState: {
-              stage: resolvedStage,
-              status: "failed",
-              elapsedSeconds: Number(totalElapsed.toFixed(1)),
-              lastCommand: "commit",
-              lastMessage: message,
-              lastAmend: amend,
-              exitCode: payload.exit_code ?? 1,
-              error: `Process failed with exit code ${payload.exit_code ?? 1}`,
-            },
-          });
-          resolve(false);
-        }
-      }).then((fn) => {
-        unlistenExitFn = fn;
-      });
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
 
-      executeGitCommitIpc(repoId, message, amend).catch((err) => {
+          const totalElapsed = (Date.now() - startTime) / 1000;
+          const resolvedStage: HookStage = hasPreCommit ? "pre-commit" : "committing";
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: resolvedStage,
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "commit",
+                lastMessage: message,
+                lastAmend: amend,
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: resolvedStage,
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "commit",
+                lastMessage: message,
+                lastAmend: amend,
+                exitCode: payload.exit_code ?? 1,
+                error: `Process failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitCommitIpc(repoId, message, amend);
+      } catch (err) {
         if (isDone) return;
         isDone = true;
-        cleanup(unlistenExitFn ?? undefined, unlistenDataFn ?? undefined);
+        cleanup();
 
         get().updateTab(tabId, {
           terminalOpen: true,
@@ -476,7 +479,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           },
         });
         resolve(false);
-      });
+      }
     });
   },
 
@@ -520,69 +523,71 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }, 100);
     activeTimers.set(tabId, timer);
 
-    return new Promise<boolean>((resolve) => {
+    return new Promise<boolean>(async (resolve) => {
       let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
 
-      const cleanup = (unlistenExit?: () => void) => {
+      const cleanup = () => {
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
         }
-        if (unlistenExit) unlistenExit();
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
       };
 
-      let unlistenExitFn: (() => void) | null = null;
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
 
-      listenToTerminalExit(repoId, async (payload) => {
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: initialStage,
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "push",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: initialStage,
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "push",
+                exitCode: payload.exit_code ?? 1,
+                error: `Push failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitPushIpc(repoId);
+      } catch (err) {
         if (isDone) return;
         isDone = true;
-        cleanup(unlistenExitFn ?? undefined);
-
-        const totalElapsed = (Date.now() - startTime) / 1000;
-
-        if (payload.success) {
-          get().updateTab(tabId, {
-            hookState: {
-              stage: initialStage,
-              status: "passed",
-              elapsedSeconds: Number(totalElapsed.toFixed(1)),
-              lastCommand: "push",
-              exitCode: 0,
-            },
-          });
-
-          await get().refreshTabMetadata(tabId);
-
-          setTimeout(() => {
-            const checkTab = get().tabs.find((t) => t.id === tabId);
-            if (checkTab?.hookState?.status === "passed") {
-              get().updateTab(tabId, { terminalOpen: false });
-            }
-          }, 1500);
-
-          resolve(true);
-        } else {
-          get().updateTab(tabId, {
-            terminalOpen: true,
-            hookState: {
-              stage: initialStage,
-              status: "failed",
-              elapsedSeconds: Number(totalElapsed.toFixed(1)),
-              lastCommand: "push",
-              exitCode: payload.exit_code ?? 1,
-              error: `Push failed with exit code ${payload.exit_code ?? 1}`,
-            },
-          });
-          resolve(false);
-        }
-      }).then((fn) => {
-        unlistenExitFn = fn;
-      });
-
-      executeGitPushIpc(repoId).catch((err) => {
-        if (isDone) return;
-        isDone = true;
-        cleanup(unlistenExitFn ?? undefined);
+        cleanup();
 
         get().updateTab(tabId, {
           terminalOpen: true,
@@ -596,7 +601,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           },
         });
         resolve(false);
-      });
+      }
     });
   },
 
@@ -616,7 +621,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         stage: "committing",
         status: "running",
         elapsedSeconds: 0,
-        lastCommand: "push",
+        lastCommand: "pull",
         exitCode: null,
         error: null,
       },
@@ -642,69 +647,71 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }, 100);
     activeTimers.set(tabId, timer);
 
-    return new Promise<boolean>((resolve) => {
+    return new Promise<boolean>(async (resolve) => {
       let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
 
-      const cleanup = (unlistenExit?: () => void) => {
+      const cleanup = () => {
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
         }
-        if (unlistenExit) unlistenExit();
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
       };
 
-      let unlistenExitFn: (() => void) | null = null;
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
 
-      listenToTerminalExit(repoId, async (payload) => {
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "committing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "pull",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "committing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "pull",
+                exitCode: payload.exit_code ?? 1,
+                error: `Pull failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitPullIpc(repoId, remote, branch, rebase);
+      } catch (err) {
         if (isDone) return;
         isDone = true;
-        cleanup(unlistenExitFn ?? undefined);
-
-        const totalElapsed = (Date.now() - startTime) / 1000;
-
-        if (payload.success) {
-          get().updateTab(tabId, {
-            hookState: {
-              stage: "committing",
-              status: "passed",
-              elapsedSeconds: Number(totalElapsed.toFixed(1)),
-              lastCommand: "push",
-              exitCode: 0,
-            },
-          });
-
-          await get().refreshTabMetadata(tabId);
-
-          setTimeout(() => {
-            const checkTab = get().tabs.find((t) => t.id === tabId);
-            if (checkTab?.hookState?.status === "passed") {
-              get().updateTab(tabId, { terminalOpen: false });
-            }
-          }, 1500);
-
-          resolve(true);
-        } else {
-          get().updateTab(tabId, {
-            terminalOpen: true,
-            hookState: {
-              stage: "committing",
-              status: "failed",
-              elapsedSeconds: Number(totalElapsed.toFixed(1)),
-              lastCommand: "push",
-              exitCode: payload.exit_code ?? 1,
-              error: `Pull failed with exit code ${payload.exit_code ?? 1}`,
-            },
-          });
-          resolve(false);
-        }
-      }).then((fn) => {
-        unlistenExitFn = fn;
-      });
-
-      executeGitPullIpc(repoId, remote, branch, rebase).catch((err) => {
-        if (isDone) return;
-        isDone = true;
-        cleanup(unlistenExitFn ?? undefined);
+        cleanup();
 
         get().updateTab(tabId, {
           terminalOpen: true,
@@ -712,13 +719,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             stage: "committing",
             status: "failed",
             elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
-            lastCommand: "push",
+            lastCommand: "pull",
             exitCode: 1,
             error: err instanceof Error ? err.message : String(err),
           },
         });
         resolve(false);
-      });
+      }
     });
   },
 

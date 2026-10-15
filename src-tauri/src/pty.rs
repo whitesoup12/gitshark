@@ -76,6 +76,9 @@ impl PtyManager {
             .spawn_command(cmd)
             .map_err(|e| format!("Failed to spawn command '{command}': {e}"))?;
 
+        // Explicitly drop slave handle so it doesn't keep the terminal open or block EOF
+        drop(pair.slave);
+
         let reader = pair
             .master
             .try_clone_reader()
@@ -86,10 +89,11 @@ impl PtyManager {
             .take_writer()
             .map_err(|e| format!("Failed to get PTY writer: {e}"))?;
 
+        let child_arc = Arc::new(Mutex::new(child));
         let session = ActivePtySession {
             writer: Arc::new(Mutex::new(writer)),
             master: Arc::new(Mutex::new(pair.master)),
-            child: Arc::new(Mutex::new(child)),
+            child: child_arc.clone(),
         };
 
         {
@@ -97,54 +101,86 @@ impl PtyManager {
             *guard = Some(session);
         }
 
-        // Spawn background thread to stream stdout/stderr from PTY master
-        let session_clone = self.active_session.clone();
-        let repo_id_for_thread = repo_id.clone();
-        let app_handle_for_thread = app_handle.clone();
+        // Spawn dedicated thread to stream stdout/stderr from PTY master
+        let repo_id_for_reader = repo_id.clone();
+        let app_handle_for_reader = app_handle.clone();
 
         thread::spawn(move || {
             let mut reader = reader;
             let mut buffer = [0u8; 4096];
-            let event_name = format!("repo:{}:terminal_data", repo_id_for_thread);
-            let exit_event_name = format!("repo:{}:terminal_exit", repo_id_for_thread);
+            let event_name = format!("repo:{}:terminal_data", repo_id_for_reader);
 
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break, // EOF reached
                     Ok(n) => {
                         let text = String::from_utf8_lossy(&buffer[..n]).to_string();
-                        let _ = app_handle_for_thread.emit(&event_name, TerminalDataPayload { data: text });
+                        let _ = app_handle_for_reader.emit(&event_name, TerminalDataPayload { data: text });
                     }
                     Err(e) => {
-                        // Broken pipe or closed terminal
-                        log::debug!("PTY reader ended for repo {}: {}", repo_id_for_thread, e);
+                        log::debug!("PTY reader ended for repo {}: {}", repo_id_for_reader, e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Spawn supervisor thread to monitor child exit and clean up PTY master handles.
+        // On Windows ConPTY, reader.read() blocks until master is closed, so the child
+        // must be waited on in parallel via try_wait() rather than after the read loop.
+        let session_clone = self.active_session.clone();
+        let repo_id_for_exit = repo_id.clone();
+        let app_handle_for_exit = app_handle.clone();
+
+        thread::spawn(move || {
+            let exit_event_name = format!("repo:{}:terminal_exit", repo_id_for_exit);
+            let mut exit_code = None;
+            let mut success = false;
+
+            loop {
+                // Check if session was killed or cleared externally
+                if session_clone.lock().is_none() {
+                    break;
+                }
+
+                let wait_res = {
+                    let mut child = child_arc.lock();
+                    child.try_wait()
+                };
+
+                match wait_res {
+                    Ok(Some(status)) => {
+                        exit_code = Some(status.exit_code());
+                        success = status.success();
+                        break;
+                    }
+                    Ok(None) => {
+                        thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(e) => {
+                        log::warn!("PTY try_wait error for repo {}: {}", repo_id_for_exit, e);
                         break;
                     }
                 }
             }
 
-            // Await child exit code
-            let mut exit_code = None;
-            let mut success = false;
+            // Give reader thread a moment to drain remaining buffered output
+            thread::sleep(std::time::Duration::from_millis(100));
 
-            if let Some(active) = session_clone.lock().as_ref() {
-                if let Ok(status) = active.child.lock().wait() {
-                    exit_code = Some(status.exit_code());
-                    success = status.success();
-                }
+            // Dropping active session drops pair.master and writer,
+            // which closes the ConPTY handle on Windows and unblocks reader.read()
+            {
+                let mut guard = session_clone.lock();
+                *guard = None;
             }
 
-            let _ = app_handle_for_thread.emit(
+            let _ = app_handle_for_exit.emit(
                 &exit_event_name,
                 TerminalExitPayload {
                     exit_code,
                     success,
                 },
             );
-
-            // Clean up session reference once finished
-            let mut guard = session_clone.lock();
-            *guard = None;
         });
 
         Ok(())
