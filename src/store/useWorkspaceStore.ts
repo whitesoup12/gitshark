@@ -17,6 +17,7 @@ import {
   executeGitCommitIpc,
   executeGitPushIpc,
   executeGitPullIpc,
+  executeGitFetchIpc,
   cancelActiveProcessIpc,
   getRepoHooksIpc,
   listWorktreesIpc,
@@ -31,9 +32,14 @@ import {
   createStashIpc,
   applyStashIpc,
   dropStashIpc,
+  listTagsIpc,
+  createTagIpc,
+  deleteTagIpc,
+  pushTagIpc,
   listenToTerminalExit,
   listenToTerminalData,
 } from "@/lib/ipc";
+import { GitTagItem } from "@/types";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -63,6 +69,7 @@ interface WorkspaceState {
     setUpstream?: boolean
   ) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
+  executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
   cancelActiveProcess: (tabId: string) => Promise<void>;
   retryLastHook: (tabId: string) => Promise<void>;
   dismissHookStatus: (tabId: string) => void;
@@ -84,6 +91,18 @@ interface WorkspaceState {
   createStash: (tabId: string, message?: string, includeUntracked?: boolean) => Promise<boolean>;
   applyStash: (tabId: string, index: number, pop?: boolean) => Promise<boolean>;
   dropStash: (tabId: string, index: number) => Promise<boolean>;
+
+  // Tags
+  fetchTags: (tabId: string) => Promise<GitTagItem[]>;
+  createTag: (
+    tabId: string,
+    tagName: string,
+    targetCommit?: string,
+    message?: string,
+    pushToRemote?: boolean
+  ) => Promise<boolean>;
+  deleteTag: (tabId: string, tagName: string) => Promise<boolean>;
+  pushTag: (tabId: string, tagName: string, remote?: string) => Promise<boolean>;
 }
 
 // Module-level timers map for elapsed stopwatch per tab
@@ -308,12 +327,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         refreshEpoch: nextEpoch,
       });
 
-      // Concurrently refresh remote sync, worktrees, branches, and stashes
+      // Concurrently refresh remote sync, worktrees, branches, stashes, and tags
       await Promise.allSettled([
         get().fetchRemoteSyncStatus(tabId),
         get().fetchWorktrees(tabId),
         get().fetchBranches(tabId),
         get().fetchStashes(tabId),
+        get().fetchTags(tabId),
       ]);
     } catch (err) {
       console.error("Failed to refresh repository metadata:", err);
@@ -746,6 +766,129 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  executeFetch: async (
+    tabId: string,
+    remote?: string,
+    prune: boolean = true
+  ): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage: "committing",
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "pull",
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    if (activeTimers.has(tabId)) {
+      clearInterval(activeTimers.get(tabId)!);
+      activeTimers.delete(tabId);
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const currentTab = get().tabs.find((t) => t.id === tabId);
+      if (currentTab?.hookState && currentTab.hookState.status === "running") {
+        get().updateTab(tabId, {
+          hookState: {
+            ...currentTab.hookState,
+            elapsedSeconds: Number(elapsed.toFixed(1)),
+          },
+        });
+      }
+    }, 100);
+    activeTimers.set(tabId, timer);
+
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (activeTimers.has(tabId)) {
+          clearInterval(activeTimers.get(tabId)!);
+          activeTimers.delete(tabId);
+        }
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "committing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "pull",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1200);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "committing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "pull",
+                exitCode: payload.exit_code ?? 1,
+                error: `Fetch failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitFetchIpc(repoId, remote, prune);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage: "committing",
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "pull",
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
+  },
+
   cancelActiveProcess: async (tabId: string) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return;
@@ -973,5 +1116,179 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       alert(err instanceof Error ? err.message : String(err));
       return false;
     }
+  },
+
+  fetchTags: async (tabId: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return [];
+
+    try {
+      const tags = await listTagsIpc(tab.repoId);
+      get().updateTab(tabId, { tags });
+      return tags;
+    } catch (err) {
+      console.warn("Failed to fetch tags:", err);
+      return [];
+    }
+  },
+
+  createTag: async (
+    tabId: string,
+    tagName: string,
+    targetCommit?: string,
+    message?: string,
+    pushToRemote = false
+  ) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await createTagIpc(tab.repoId, tagName, targetCommit, message);
+      if (pushToRemote) {
+        await get().pushTag(tabId, tagName);
+      }
+      await get().refreshTabMetadata(tabId);
+      await get().fetchTags(tabId);
+      return true;
+    } catch (err) {
+      console.error("Failed to create tag:", err);
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  },
+
+  deleteTag: async (tabId: string, tagName: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await deleteTagIpc(tab.repoId, tagName);
+      await get().refreshTabMetadata(tabId);
+      await get().fetchTags(tabId);
+      return true;
+    } catch (err) {
+      console.error("Failed to delete tag:", err);
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  },
+
+  pushTag: async (tabId: string, tagName: string, remote = "origin") => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage: "committing",
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "push",
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    if (activeTimers.has(tabId)) {
+      clearInterval(activeTimers.get(tabId)!);
+      activeTimers.delete(tabId);
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const currentTab = get().tabs.find((t) => t.id === tabId);
+      if (currentTab?.hookState && currentTab.hookState.status === "running") {
+        get().updateTab(tabId, {
+          hookState: {
+            ...currentTab.hookState,
+            elapsedSeconds: Number(elapsed.toFixed(1)),
+          },
+        });
+      }
+    }, 100);
+    activeTimers.set(tabId, timer);
+
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (activeTimers.has(tabId)) {
+          clearInterval(activeTimers.get(tabId)!);
+          activeTimers.delete(tabId);
+        }
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "committing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "push",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "committing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "push",
+                exitCode: payload.exit_code ?? 1,
+                error: `Push tag failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await pushTagIpc(repoId, tagName, remote);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage: "committing",
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "push",
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
   },
 }));

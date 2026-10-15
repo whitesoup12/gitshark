@@ -1,7 +1,7 @@
 {
   "name": "gitshark",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run-tauri.mjs dev",
@@ -11,7 +11,9 @@
     "build": "tsc && vite build",
     "build:desktop": "node scripts/run-tauri.mjs build",
     "preview": "vite preview",
-    "tauri": "node scripts/run-tauri.mjs"
+    "tauri": "node scripts/run-tauri.mjs",
+    "package:portable": "node scripts/package-release.mjs",
+    "package:scoop": "node scripts/package-release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",

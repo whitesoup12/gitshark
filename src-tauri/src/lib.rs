@@ -15,6 +15,22 @@ pub fn run() {
         .manage(create_app_state())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
+                if let Ok(Some(monitor)) = window.current_monitor() {
+                    let scale = monitor.scale_factor();
+                    let screen_width = monitor.size().width as f64 / scale;
+                    let screen_height = monitor.size().height as f64 / scale;
+
+                    // Desired default dimensions: 1600x1000, but clamped to 90% of screen size if smaller
+                    let target_width = 1600.0_f64.min(screen_width * 0.92).max(960.0);
+                    let target_height = 1000.0_f64.min(screen_height * 0.90).max(600.0);
+
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                        width: target_width,
+                        height: target_height,
+                    }));
+                    let _ = window.center();
+                }
+
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -40,6 +56,7 @@ pub fn run() {
             commands::execute_git_commit,
             commands::execute_git_push,
             commands::execute_git_pull,
+            commands::execute_git_fetch,
             commands::cancel_active_process,
             commands::get_repo_hooks,
             commands::list_worktrees,
@@ -58,6 +75,10 @@ pub fn run() {
             commands::drop_stash,
             commands::get_commit_details,
             commands::get_commit_file_diff,
+            commands::list_tags,
+            commands::create_tag,
+            commands::delete_tag,
+            commands::push_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

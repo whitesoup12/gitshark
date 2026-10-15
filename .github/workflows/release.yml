@@ -1,0 +1,73 @@
+name: Release GitShark Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Git Tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+      draft:
+        description: 'Create as Draft Release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Publish Windows Executables
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Run Test Suite
+        run: |
+          npm run build
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build & Package Windows Executables
+        run: npm run package:portable
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: GitShark ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist-release/*.zip
+            dist-release/gitshark.exe
+            dist-release/SHA256SUMS.txt
+            packaging/scoop/gitshark.json
+          generate_release_notes: true
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

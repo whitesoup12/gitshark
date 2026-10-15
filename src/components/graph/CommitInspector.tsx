@@ -13,9 +13,14 @@ import {
   ArrowLeft,
   FileText,
   Loader2,
+  Bookmark,
+  Plus,
+  Trash2,
+  UploadCloud,
 } from "lucide-react";
 import { formatShortHash } from "@/lib/utils";
 import { getCommitDetailsIpc, getCommitFileDiffIpc } from "@/lib/ipc";
+import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 
 interface CommitInspectorProps {
   repoId: string;
@@ -30,10 +35,19 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
   onClose,
   onSelectCommit,
 }) => {
+  const { activeTabId, createTag, deleteTag, pushTag } = useWorkspaceStore();
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [details, setDetails] = useState<CommitDetails | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Tag creation state
+  const [showTagForm, setShowTagForm] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagMessage, setNewTagMessage] = useState("");
+  const [pushTagToRemote, setPushTagToRemote] = useState(false);
+  const [isSubmittingTag, setIsSubmittingTag] = useState(false);
+  const [pushingTagName, setPushingTagName] = useState<string | null>(null);
 
   // Selected file for diff preview inside the commit
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -106,6 +120,47 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCreateTag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTagName.trim() || isSubmittingTag || !activeTabId) return;
+
+    setIsSubmittingTag(true);
+    try {
+      const success = await createTag(
+        activeTabId,
+        newTagName.trim(),
+        commit.hash,
+        newTagMessage.trim() || undefined,
+        pushTagToRemote
+      );
+      if (success) {
+        setNewTagName("");
+        setNewTagMessage("");
+        setPushTagToRemote(false);
+        setShowTagForm(false);
+      }
+    } finally {
+      setIsSubmittingTag(false);
+    }
+  };
+
+  const handleDeleteTag = async (name: string) => {
+    if (!activeTabId) return;
+    if (window.confirm(`Are you sure you want to delete tag '${name}'?`)) {
+      await deleteTag(activeTabId, name);
+    }
+  };
+
+  const handlePushTag = async (name: string) => {
+    if (!activeTabId) return;
+    setPushingTagName(name);
+    try {
+      await pushTag(activeTabId, name);
+    } finally {
+      setPushingTagName(null);
+    }
+  };
+
   const formattedDate = new Date(commit.timestamp * 1000).toLocaleString(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -149,6 +204,19 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
             )}
           </button>
 
+          <button
+            onClick={() => setShowTagForm((prev) => !prev)}
+            className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border transition-colors flex-shrink-0 ${
+              showTagForm
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
+                : "bg-shark-800 hover:bg-shark-750 text-slate-300 border-shark-700 hover:text-amber-300"
+            }`}
+            title="Create tag on this commit"
+          >
+            <Bookmark className="w-3 h-3 text-amber-400" />
+            <span>Tag</span>
+          </button>
+
           {details && (
             <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono flex-shrink-0">
               <span className="text-emerald-400">+{details.total_additions}</span>
@@ -183,6 +251,63 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
         </div>
       </div>
 
+      {/* Inline Tag Creation Bar */}
+      {showTagForm && (
+        <form
+          onSubmit={handleCreateTag}
+          className="px-4 py-2 bg-shark-950 border-b border-shark-800 flex flex-wrap items-center gap-2 text-xs flex-shrink-0"
+        >
+          <div className="flex items-center gap-1.5 text-xs text-amber-300 font-medium">
+            <Bookmark className="w-3.5 h-3.5" />
+            <span>New Tag:</span>
+          </div>
+          <input
+            type="text"
+            placeholder="Tag name (e.g. v1.0.0)"
+            value={newTagName}
+            onChange={(e) => setNewTagName(e.target.value)}
+            className="px-2 py-1 rounded bg-shark-900 border border-shark-750 text-slate-100 placeholder-slate-500 text-xs focus:outline-none focus:border-amber-500 w-44"
+            autoFocus
+            required
+          />
+          <input
+            type="text"
+            placeholder="Annotation message (optional)"
+            value={newTagMessage}
+            onChange={(e) => setNewTagMessage(e.target.value)}
+            className="px-2 py-1 rounded bg-shark-900 border border-shark-750 text-slate-100 placeholder-slate-500 text-xs focus:outline-none focus:border-amber-500 flex-1 min-w-[180px]"
+          />
+          <label className="flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={pushTagToRemote}
+              onChange={(e) => setPushTagToRemote(e.target.checked)}
+              className="rounded bg-shark-900 border-shark-700 text-amber-500"
+            />
+            <span>Push to remote</span>
+          </label>
+          <button
+            type="submit"
+            disabled={!newTagName.trim() || isSubmittingTag}
+            className="px-2.5 py-1 rounded text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+          >
+            {isSubmittingTag ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Plus className="w-3 h-3" />
+            )}
+            <span>Create</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowTagForm(false)}
+            className="px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-200"
+          >
+            Cancel
+          </button>
+        </form>
+      )}
+
       {/* Main Inspector Body */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Column: Author, Message, Parents */}
@@ -202,14 +327,51 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
           {/* References / Badges */}
           {commit.refs && commit.refs.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              {commit.refs.map((r) => (
-                <span
-                  key={r.name}
-                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-sky-950/60 text-sky-300 border border-sky-800/50"
-                >
-                  {r.shorthand}
-                </span>
-              ))}
+              {commit.refs.map((r) => {
+                const isTag = r.kind === "tag";
+                return (
+                  <span
+                    key={r.name}
+                    className={`group/ref inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                      isTag
+                        ? "bg-amber-950/60 text-amber-300 border-amber-800/50"
+                        : "bg-sky-950/60 text-sky-300 border-sky-800/50"
+                    }`}
+                  >
+                    {isTag && <Bookmark className="w-2.5 h-2.5 text-amber-400" />}
+                    <span>{r.shorthand}</span>
+                    {isTag && (
+                      <span className="flex items-center gap-0.5 opacity-0 group-hover/ref:opacity-100 transition-opacity ml-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePushTag(r.shorthand);
+                          }}
+                          disabled={pushingTagName === r.shorthand}
+                          title={`Push tag '${r.shorthand}' to remote origin`}
+                          className="hover:text-amber-100"
+                        >
+                          {pushingTagName === r.shorthand ? (
+                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                          ) : (
+                            <UploadCloud className="w-2.5 h-2.5" />
+                          )}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTag(r.shorthand);
+                          }}
+                          title={`Delete tag '${r.shorthand}'`}
+                          className="hover:text-rose-400"
+                        >
+                          <Trash2 className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
             </div>
           )}
 

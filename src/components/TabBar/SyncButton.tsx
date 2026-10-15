@@ -14,7 +14,7 @@ interface SyncButtonProps {
 }
 
 export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
-  const { executePull, executePush, fetchRemoteSyncStatus, fetchBranches, refreshTabMetadata } = useWorkspaceStore();
+  const { executePull, executePush, executeFetch, fetchRemoteSyncStatus, fetchBranches, refreshTabMetadata } = useWorkspaceStore();
   const [isPulling, setIsPulling] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
@@ -61,8 +61,10 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
     if (!tab.repoId || isFetching) return;
     setIsFetching(true);
     try {
+      await executeFetch(tab.id, undefined, true);
       await fetchRemoteSyncStatus(tab.id);
       await fetchBranches(tab.id);
+      await refreshTabMetadata(tab.id);
     } catch (err) {
       console.warn("Fetch failed:", err);
     } finally {

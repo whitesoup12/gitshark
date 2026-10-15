@@ -588,7 +588,7 @@ pub async fn execute_git_pull(
     };
 
     let git_cmd = resolve_git_command();
-    let mut args = vec!["pull".to_string()];
+    let mut args = vec!["pull".to_string(), "--prune".to_string()];
     if rebase.unwrap_or(false) {
         args.push("--rebase".to_string());
     }
@@ -597,6 +597,44 @@ pub async fn execute_git_pull(
         if let Some(b) = branch {
             args.push(b);
         }
+    }
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn execute_git_fetch(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    remote: Option<String>,
+    prune: Option<bool>,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let mut args = vec!["fetch".to_string()];
+    if prune.unwrap_or(true) {
+        args.push("--prune".to_string());
+    }
+    if let Some(r) = remote {
+        args.push(r);
+    } else {
+        args.push("--all".to_string());
     }
 
     pty_manager.spawn(
@@ -986,6 +1024,86 @@ pub async fn get_commit_file_diff(
         .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
     let repo = session.repo.lock();
     git::get_commit_file_diff(&repo, &commit_sha, &file_path)
+}
+
+#[tauri::command]
+pub async fn list_tags(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+) -> Result<Vec<git::GitTagItem>, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::list_tags(&repo)
+}
+
+#[tauri::command]
+pub async fn create_tag(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    tag_name: String,
+    target_commit: Option<String>,
+    message: Option<String>,
+) -> Result<git::GitTagItem, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::create_tag(
+        &repo,
+        &tag_name,
+        target_commit.as_deref(),
+        message.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn delete_tag(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    tag_name: String,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::delete_tag(&repo, &tag_name)
+}
+
+#[tauri::command]
+pub async fn push_tag(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    tag_name: String,
+    remote: Option<String>,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let remote_target = remote.unwrap_or_else(|| "origin".to_string());
+    let clean_tag = tag_name.trim().trim_start_matches("refs/tags/");
+    let args = vec!["push".to_string(), remote_target, format!("refs/tags/{clean_tag}")];
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
 }
 
 

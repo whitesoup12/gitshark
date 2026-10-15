@@ -51,3 +51,11 @@ export interface StashItem {
   commit_id: string;
 }
 
+export interface GitTagItem {
+  name: string;
+  target_commit: string;
+  message?: string | null;
+  tagger?: string | null;
+  tagger_date?: number | null;
+}
+
