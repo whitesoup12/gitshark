@@ -29,10 +29,12 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
   selectedHashRef.current = tab.selectedCommitHash;
 
   // Fetch topological commit DAG whenever repoId changes or refresh is requested
-  const loadCommitGraph = useCallback(async () => {
+  const loadCommitGraph = useCallback(async (silent = false) => {
     if (!tab.repoId) return;
 
-    setIsLoadingGraph(true);
+    if (!silent) {
+      setIsLoadingGraph(true);
+    }
     try {
       const graphNodes = await getCommitGraphIpc(tab.repoId, 1000, 0);
       setCommits(graphNodes);
@@ -44,7 +46,9 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
     } catch (err) {
       console.error("Failed to load commit graph:", err);
     } finally {
-      setIsLoadingGraph(false);
+      if (!silent) {
+        setIsLoadingGraph(false);
+      }
     }
   }, [tab.repoId, tab.id, updateTab]);
 
@@ -72,7 +76,9 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
 
     let unlisten: (() => void) | null = null;
     listenToStatusChanged(tab.repoId, () => {
-      loadCommitGraph();
+      if (tab.activeView === "graph") {
+        loadCommitGraph(true);
+      }
     }).then((fn) => {
       unlisten = fn;
     });
@@ -80,7 +86,7 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [tab.repoId, loadCommitGraph]);
+  }, [tab.repoId, tab.activeView, loadCommitGraph]);
 
   const handleSelectCommit = (hash: string) => {
     updateTab(tab.id, { selectedCommitHash: hash });
@@ -134,7 +140,7 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
         {/* Right: Repository Working Directory Badges & Refresh */}
         <div className="flex items-center gap-2 text-xs">
           <button
-            onClick={loadCommitGraph}
+            onClick={() => loadCommitGraph()}
             disabled={isLoadingGraph}
             className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800 transition-colors mr-1"
             title="Reload Commit Graph"

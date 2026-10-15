@@ -6,6 +6,7 @@ import { WorkspaceShell } from "@/components/Layout/WorkspaceShell";
 import { EmptyWorkspace } from "@/components/EmptyState/EmptyWorkspace";
 import { CloneWizardModal } from "@/components/Clone/CloneWizardModal";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
+import { SharkCelebrationOverlay, SharkWisdomModal } from "@/components/common/SharkCompanion";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId } = useWorkspaceStore();
@@ -36,6 +37,16 @@ export const App: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isSettingsOpen, openSettings, closeSettings]);
 
+  // Prevent default native browser/WebView2 context menu across the application
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    window.addEventListener("contextmenu", handleContextMenu);
+    return () => window.removeEventListener("contextmenu", handleContextMenu);
+  }, []);
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-shark-950 font-sans">
       {/* Top Multi-Repository Tab Bar */}
@@ -53,6 +64,12 @@ export const App: React.FC = () => {
 
       {/* Global Application Settings Modal */}
       <SettingsModal />
+
+      {/* Interactive Shark Wisdom Speech Bubble */}
+      <SharkWisdomModal />
+
+      {/* Swimming Shark & Commit Bubble Celebration Overlay */}
+      <SharkCelebrationOverlay />
     </div>
   );
 };

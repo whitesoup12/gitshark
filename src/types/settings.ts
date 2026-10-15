@@ -7,3 +7,5 @@ export interface GitBinaryInfo {
 }
 
 export type SettingsTab = "git" | "terminal" | "appearance" | "about";
+
+export type DiffRefreshDelayOption = 500 | 1000 | 1500 | 2500 | 4000;

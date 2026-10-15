@@ -1,9 +1,10 @@
 import React from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { TabItem } from "./TabItem";
-import { Plus, Terminal as TerminalIcon, Download } from "lucide-react";
+import { Plus, Terminal as TerminalIcon, Download, Globe, GitPullRequest } from "lucide-react";
 import { SyncButton } from "./SyncButton";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
+import { useSharkStore } from "@/store/useSharkStore";
 
 export const TabBar: React.FC = () => {
   const {
@@ -14,8 +15,10 @@ export const TabBar: React.FC = () => {
     openRepositoryTab,
     toggleTerminal,
     setCloneModalOpen,
+    openRepoInBrowser,
+    createPullRequestInBrowser,
   } = useWorkspaceStore();
-
+  const { openWisdom } = useSharkStore();
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -24,12 +27,16 @@ export const TabBar: React.FC = () => {
       {/* Left side: Tabs container */}
       <div className="flex items-center h-full overflow-x-auto no-scrollbar max-w-[calc(100vw-220px)]">
         {/* App Logo / Mark */}
-        <div className="flex items-center gap-2 px-3 py-1 font-bold tracking-tight text-sm select-none border-r border-shark-800 mr-1 flex-shrink-0 group cursor-default">
-          <GitSharkLogo size="sm" withBackground={false} withGlow={true} className="transition-transform group-hover:scale-110 duration-200" />
+        <button
+          onClick={() => openWisdom()}
+          className="flex items-center gap-2 px-2.5 py-1 font-bold tracking-tight text-sm select-none border-r border-shark-800 mr-1 flex-shrink-0 group cursor-pointer hover:bg-shark-900/60 rounded transition-all text-left"
+          title="GitShark - Click for Shark Wisdom & Easter Eggs 🦈"
+        >
+          <GitSharkLogo size="sm" withBackground={false} withGlow={true} className="transition-transform group-hover:scale-110 group-hover:rotate-6 duration-200" />
           <span className="bg-gradient-to-r from-sky-400 via-teal-300 to-sky-200 bg-clip-text text-transparent font-extrabold tracking-wide">
             GitShark
           </span>
-        </div>
+        </button>
 
         {/* Tab Items List */}
         <div className="flex items-center h-full">
@@ -70,6 +77,26 @@ export const TabBar: React.FC = () => {
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {/* Ahead/Behind Sync Button */}
           <SyncButton tab={activeTab} />
+
+          {/* Open in Browser Shortcut Button */}
+          <button
+            onClick={() => openRepoInBrowser(activeTab.id)}
+            className="flex items-center gap-1.5 h-7 px-2 rounded text-xs border border-shark-800 text-slate-400 hover:text-sky-300 hover:border-sky-800/60 hover:bg-shark-850 transition-colors"
+            title="Open Repository in Browser (Ctrl+Shift+B / Cmd+Shift+B)"
+          >
+            <Globe className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden md:inline text-[11px]">Browser</span>
+          </button>
+
+          {/* Create Pull Request Shortcut Button */}
+          <button
+            onClick={() => createPullRequestInBrowser(activeTab.id)}
+            className="flex items-center gap-1.5 h-7 px-2 rounded text-xs border border-shark-800 text-slate-400 hover:text-emerald-300 hover:border-emerald-800/60 hover:bg-shark-850 transition-colors"
+            title="Create Pull Request in Browser (Ctrl+Shift+P / Cmd+Shift+P)"
+          >
+            <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden md:inline text-[11px]">New PR</span>
+          </button>
 
           <button
             onClick={() => toggleTerminal(activeTab.id)}

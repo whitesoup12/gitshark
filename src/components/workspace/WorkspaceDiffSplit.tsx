@@ -10,6 +10,7 @@ import {
   unstageAllFilesIpc,
   stageHunkIpc,
   discardFileChangesIpc,
+  discardAllUnstagedChangesIpc,
   getFileDiffIpc,
   listenToStatusChanged,
 } from "@/lib/ipc";
@@ -29,18 +30,48 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
+  const [isRefreshingDiff, setIsRefreshingDiff] = useState(false);
 
   // 1. Fetch working directory status
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (silent = false) => {
     if (!tab.repoId) return;
-    setIsLoadingStatus(true);
+    if (!silent) {
+      setIsLoadingStatus(true);
+    }
     try {
       const currentStatus = await getWorkingTreeStatusIpc(tab.repoId);
       setStatus(currentStatus);
 
-      // If no file currently selected, auto-select first available file
+      // If no file currently selected or previously selected file was removed, auto-select first available file
       setSelectedFilePath((prev) => {
-        if (prev) return prev;
+        if (!prev) {
+          const firstUnstaged = currentStatus.unstaged[0] || currentStatus.untracked[0];
+          if (firstUnstaged) {
+            setSelectedFileStaged(false);
+            return firstUnstaged.path;
+          }
+          const firstStaged = currentStatus.staged[0];
+          if (firstStaged) {
+            setSelectedFileStaged(true);
+            return firstStaged.path;
+          }
+          return null;
+        }
+
+        const existsInUnstaged =
+          currentStatus.unstaged.some((f) => f.path === prev) ||
+          currentStatus.untracked.some((f) => f.path === prev);
+        const existsInStaged = currentStatus.staged.some((f) => f.path === prev);
+
+        if (existsInUnstaged) {
+          setSelectedFileStaged(false);
+          return prev;
+        }
+        if (existsInStaged) {
+          setSelectedFileStaged(true);
+          return prev;
+        }
+
         const firstUnstaged = currentStatus.unstaged[0] || currentStatus.untracked[0];
         if (firstUnstaged) {
           setSelectedFileStaged(false);
@@ -56,18 +87,24 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     } catch (err) {
       console.error("Failed to load working tree status:", err);
     } finally {
-      setIsLoadingStatus(false);
+      if (!silent) {
+        setIsLoadingStatus(false);
+      }
     }
   }, [tab.repoId]);
 
   // 2. Fetch diff for selected file
-  const loadDiff = useCallback(async () => {
+  const loadDiff = useCallback(async (silent = false) => {
     if (!tab.repoId || !selectedFilePath) {
       setDiff(null);
       return;
     }
 
-    setIsLoadingDiff(true);
+    if (!silent) {
+      setIsLoadingDiff(true);
+    } else {
+      setIsRefreshingDiff(true);
+    }
     try {
       const fileDiff = await getFileDiffIpc(
         tab.repoId,
@@ -77,11 +114,22 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
       setDiff(fileDiff);
     } catch (err) {
       console.error("Failed to load file diff:", err);
-      setDiff(null);
+      if (!silent) {
+        setDiff(null);
+      }
     } finally {
-      setIsLoadingDiff(false);
+      if (!silent) {
+        setIsLoadingDiff(false);
+      } else {
+        setIsRefreshingDiff(false);
+      }
     }
   }, [tab.repoId, selectedFilePath, selectedFileStaged]);
+
+  // Reset diff to null whenever active selected file changes so the new file diff loads cleanly
+  useEffect(() => {
+    setDiff(null);
+  }, [selectedFilePath, selectedFileStaged]);
 
   useEffect(() => {
     loadStatus();
@@ -91,19 +139,27 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     loadDiff();
   }, [loadDiff]);
 
-  // 3. Listen to filesystem watcher changes via notify
+  // 3. Listen to filesystem watcher changes via notify with trailing debounce and silent refresh
   useEffect(() => {
     if (!tab.repoId) return;
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let unlisten: (() => void) | null = null;
+
     listenToStatusChanged(tab.repoId, () => {
-      loadStatus();
-      loadDiff();
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        loadStatus(true);
+        loadDiff(true);
+      }, 250);
     }).then((fn) => {
       unlisten = fn;
     });
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (unlisten) unlisten();
     };
   }, [tab.repoId, loadStatus, loadDiff]);
@@ -166,6 +222,16 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     }
   };
 
+  const handleDiscardAll = async () => {
+    if (!tab.repoId) return;
+    await discardAllUnstagedChangesIpc(tab.repoId);
+    await loadStatus();
+    if (!selectedFileStaged) {
+      setDiff(null);
+      setSelectedFilePath(null);
+    }
+  };
+
   const handleStageHunk = async (patch: string) => {
     if (!tab.repoId) return;
     await stageHunkIpc(tab.repoId, patch);
@@ -199,6 +265,7 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
         onStageAll={handleStageAll}
         onUnstageAll={handleUnstageAll}
         onDiscardFile={handleDiscardFile}
+        onDiscardAll={handleDiscardAll}
         onRefresh={loadStatus}
         isLoading={isLoadingStatus}
       />
@@ -211,6 +278,7 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
         onStageHunk={handleStageHunk}
         onToggleStageFile={handleToggleStageFile}
         isLoading={isLoadingDiff}
+        isRefreshing={isRefreshingDiff}
       />
     </div>
   );

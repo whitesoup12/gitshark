@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Tab } from "@/types";
 import {
   GitBranch,
@@ -16,8 +16,6 @@ import {
   Plus,
   Trash2,
   Loader2,
-  Check,
-  Cloud,
   Settings,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
@@ -25,7 +23,10 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { WorktreeSection } from "./WorktreeSection";
 import { StashSection } from "./StashSection";
 import { TagSection } from "./TagSection";
+import { BranchContextMenu } from "./BranchContextMenu";
+import type { BranchItem } from "@/types";
 import { APP_VERSION } from "@/constants/version";
+import { listenToStatusChanged } from "@/lib/ipc";
 
 
 interface SidebarProps {
@@ -41,8 +42,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     executePull,
     executePush,
     executeFetch,
+    executeMerge,
     fetchRemoteSyncStatus,
     fetchBranches,
+    createPullRequestInBrowser,
   } = useWorkspaceStore();
 
   const openSettings = useSettingsStore((s) => s.openSettings);
@@ -57,10 +60,88 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   });
 
   const [isAddingBranch, setIsAddingBranch] = useState(false);
+  const [createBranchBase, setCreateBranchBase] = useState<BranchItem | null>(null);
   const [newBranchName, setNewBranchName] = useState("");
   const [checkoutNewBranch, setCheckoutNewBranch] = useState(true);
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
   const [isFetchingRemote, setIsFetchingRemote] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    branch: BranchItem;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Resizable sidebar width with persistence
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("gitshark_sidebar_width");
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 180 && parsed <= 650) {
+        return parsed;
+      }
+    }
+    return 256;
+  });
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+
+  const handleSidebarResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingSidebar(true);
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(Math.max(startWidth + delta, 180), 650);
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      setIsResizingSidebar(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      const delta = upEvent.clientX - startX;
+      const finalWidth = Math.min(Math.max(startWidth + delta, 180), 650);
+      localStorage.setItem("gitshark_sidebar_width", String(finalWidth));
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleResetSidebarWidth = () => {
+    setSidebarWidth(256);
+    localStorage.setItem("gitshark_sidebar_width", "256");
+  };
+
+  // Real-time listener for working tree changes / commits / branch switches
+  useEffect(() => {
+    if (!tab.repoId) return;
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let unlisten: (() => void) | null = null;
+
+    listenToStatusChanged(tab.repoId, () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        fetchBranches(tab.id);
+        fetchRemoteSyncStatus(tab.id);
+      }, 300);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (unlisten) unlisten();
+    };
+  }, [tab.repoId, tab.id, fetchBranches, fetchRemoteSyncStatus]);
 
   const toggleSection = (key: keyof typeof sectionsOpen) => {
     setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -72,15 +153,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
 
     setIsCreatingBranch(true);
     try {
+      const targetCommit = createBranchBase?.target_commit ?? undefined;
       const success = await createBranch(
         tab.id,
         newBranchName.trim(),
-        undefined,
+        targetCommit,
         checkoutNewBranch
       );
       if (success) {
         setNewBranchName("");
         setIsAddingBranch(false);
+        setCreateBranchBase(null);
       }
     } finally {
       setIsCreatingBranch(false);
@@ -94,6 +177,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     if (window.confirm(promptMsg)) {
       await deleteBranch(tab.id, branchName, isRemote);
     }
+  };
+
+  const handlePullBranch = async (branch: BranchItem) => {
+    if (branch.is_remote) {
+      const remoteName = branch.shorthand.split("/")[0] || "origin";
+      await executeFetch(tab.id, remoteName);
+    } else {
+      await executePull(tab.id, undefined, branch.shorthand);
+    }
+  };
+
+  const handlePushBranch = async (branch: BranchItem) => {
+    await executePush(tab.id, undefined, branch.shorthand);
+  };
+
+  const handleFetch = async () => {
+    await executeFetch(tab.id);
+  };
+
+  const handleMergeBranch = async (branch: BranchItem) => {
+    await executeMerge(tab.id, branch.shorthand);
+  };
+
+  const handleCheckoutBranch = async (branch: BranchItem) => {
+    await checkoutBranch(tab.id, branch.shorthand);
   };
 
   const metadata = tab.metadata;
@@ -112,10 +220,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
 
   return (
     <aside
-      className={`flex flex-col bg-shark-900 border-r border-shark-800 transition-all duration-200 select-none ${
-        tab.sidebarCollapsed ? "w-12" : "w-64"
-      } h-full`}
+      style={{
+        width: tab.sidebarCollapsed ? 48 : sidebarWidth,
+      }}
+      className={`flex flex-col bg-shark-900 border-r border-shark-800 select-none h-full relative flex-shrink-0 ${
+        isResizingSidebar ? "" : "transition-[width] duration-200"
+      }`}
     >
+      {/* Draggable resize handle on right border for wide branch name visibility */}
+      {!tab.sidebarCollapsed && (
+        <div
+          onMouseDown={handleSidebarResizeMouseDown}
+          onDoubleClick={handleResetSidebarWidth}
+          className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+          title="Drag to resize sidebar for full branch names (Double-click to reset)"
+        >
+          <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
+        </div>
+      )}
+
       {/* Sidebar Header */}
       <div className="flex items-center justify-between px-3 h-11 border-b border-shark-800">
         <div className="flex items-center gap-2 truncate">
@@ -157,74 +280,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
       ) : (
         /* Expanded full sidebar content */
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 text-xs">
-          {/* Active / Current Branch Callout */}
-          <div className="p-2.5 rounded-md bg-shark-850/80 border border-shark-750/70 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                Active Branch
-              </span>
-              {/* Working Tree Clean/Dirty Badge */}
-              {metadata?.is_dirty ? (
-                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-medium border border-amber-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span>
-                    Dirty ({(metadata?.staged_count ?? 0) + (metadata?.unstaged_count ?? 0) + (metadata?.untracked_count ?? 0)})
-                  </span>
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium border border-emerald-500/30">
-                  <Check className="w-2.5 h-2.5 text-emerald-400" />
-                  <span>Clean</span>
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 font-medium text-sky-300 truncate">
-                <GitBranch className="w-3.5 h-3.5 flex-shrink-0" />
-                <span className="truncate">{currentBranch}</span>
-              </div>
-
-              {/* Upstream Tracking Status */}
-              {tab.remoteSync && (
-                <div className="flex items-center gap-1 text-[10px] flex-shrink-0">
-                  {!tab.remoteSync.has_upstream ? (
-                    <span className="text-slate-500 text-[10px]">No upstream</span>
-                  ) : tab.remoteSync.ahead > 0 || tab.remoteSync.behind > 0 ? (
-                    <div className="flex items-center gap-1 font-mono">
-                      {tab.remoteSync.ahead > 0 && (
-                        <span
-                          className="text-emerald-400 flex items-center gap-0.5"
-                          title={`${tab.remoteSync.ahead} commit(s) ahead of remote`}
-                        >
-                          <ArrowUp className="w-3 h-3" />
-                          {tab.remoteSync.ahead}
-                        </span>
-                      )}
-                      {tab.remoteSync.behind > 0 && (
-                        <span
-                          className="text-amber-400 flex items-center gap-0.5"
-                          title={`${tab.remoteSync.behind} commit(s) behind remote`}
-                        >
-                          <ArrowDown className="w-3 h-3" />
-                          {tab.remoteSync.behind}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span
-                      className="text-sky-400/80 flex items-center gap-1 font-mono text-[10px]"
-                      title="Up to date with remote"
-                    >
-                      <Cloud className="w-3 h-3 text-sky-400" />
-                      <span>synced</span>
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
           {/* Section: Local Branches */}
           <div>
             <div className="flex items-center justify-between w-full px-1.5 py-1 text-slate-300 font-medium select-none group">
@@ -245,10 +300,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (!sectionsOpen.branches) toggleSection("branches");
+                  setCreateBranchBase(null);
                   setIsAddingBranch((prev) => !prev);
                 }}
                 className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
-                title="Create New Branch"
+                title="Create New Branch from current HEAD"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -262,16 +318,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                     onSubmit={handleCreateBranch}
                     className="p-2.5 bg-shark-950 border border-sky-600/40 rounded-lg space-y-2 mb-2 text-xs select-none shadow-md"
                   >
-                    <div className="text-[11px] font-bold text-sky-300 flex items-center gap-1">
-                      <GitBranch className="w-3 h-3" />
-                      <span>New Branch</span>
+                    <div className="text-[11px] font-bold text-sky-300 flex items-center justify-between">
+                      <div className="flex items-center gap-1 truncate">
+                        <GitBranch className="w-3 h-3 text-sky-400" />
+                        <span>New Branch</span>
+                      </div>
+                      {createBranchBase && (
+                        <span
+                          className="text-[10px] text-slate-400 font-mono font-normal truncate max-w-[240px]"
+                          title={`Branching from '${createBranchBase.shorthand}'`}
+                        >
+                          from: {createBranchBase.shorthand}
+                        </span>
+                      )}
                     </div>
 
                     <input
                       type="text"
                       value={newBranchName}
                       onChange={(e) => setNewBranchName(e.target.value)}
-                      placeholder="Branch name (e.g. feature/my-branch)"
+                      placeholder={
+                        createBranchBase
+                          ? `Branch name from ${createBranchBase.shorthand}`
+                          : "Branch name (e.g. feature/my-branch)"
+                      }
                       className="w-full px-2 py-1 bg-shark-900 border border-shark-750 focus:border-sky-500 rounded text-[11px] font-mono text-slate-200 outline-none"
                       autoFocus
                       required
@@ -290,7 +360,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                     <div className="flex items-center justify-end gap-1.5 pt-1">
                       <button
                         type="button"
-                        onClick={() => setIsAddingBranch(false)}
+                        onClick={() => {
+                          setIsAddingBranch(false);
+                          setCreateBranchBase(null);
+                        }}
                         className="px-2 py-0.5 rounded text-[10px] text-slate-400 hover:text-slate-200 hover:bg-shark-800"
                       >
                         Cancel
@@ -312,6 +385,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
 
                 {localBranches.map((branch) => {
                   const isCurrent = branch.is_head || branch.shorthand === currentBranch;
+                  const hasUncommitted = (isCurrent && (metadata?.is_dirty || (metadata?.staged_count ?? 0) + (metadata?.unstaged_count ?? 0) + (metadata?.untracked_count ?? 0) > 0)) || Boolean(branch.has_uncommitted);
+                  const aheadCount = isCurrent && tab.remoteSync ? tab.remoteSync.ahead : (branch.ahead ?? 0);
+                  const behindCount = isCurrent && tab.remoteSync ? tab.remoteSync.behind : (branch.behind ?? 0);
+
                   return (
                     <div
                       key={branch.name}
@@ -320,26 +397,80 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                           checkoutBranch(tab.id, branch.shorthand);
                         }
                       }}
-                      className={`group flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors ${
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({
+                          branch,
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }}
+                      className={`group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors ${
                         isCurrent
                           ? "bg-sky-950/40 text-sky-300 border border-sky-800/40 font-medium"
-                          : "text-slate-400 hover:text-slate-200 hover:bg-shark-800/60"
+                          : "text-slate-400 hover:text-slate-200 hover:bg-shark-800/60 border border-transparent"
                       }`}
-                      title={isCurrent ? "Current branch" : `Click to checkout '${branch.shorthand}'`}
+                      title={isCurrent ? "Current branch (right-click for actions)" : `Click to checkout '${branch.shorthand}' (right-click for actions)`}
                     >
-                      <div className="flex items-center gap-2 truncate flex-1 mr-1">
+                      <div className="flex items-center gap-2 truncate flex-1 mr-2">
                         <span
                           className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                            isCurrent ? "bg-sky-400" : "bg-slate-600 group-hover:bg-slate-400"
+                            isCurrent
+                              ? hasUncommitted
+                                ? "bg-amber-400 animate-pulse"
+                                : "bg-sky-400"
+                              : hasUncommitted
+                              ? "bg-amber-400"
+                              : "bg-slate-600 group-hover:bg-slate-400"
                           }`}
                         />
                         <span className="truncate">{branch.shorthand}</span>
                       </div>
-                      <div className="flex items-center gap-1">
-                        {isCurrent ? (
-                          <span className="text-[10px] text-sky-400/80 font-mono">HEAD</span>
-                        ) : (
-                          <>
+
+                      {/* Branch Status Indicators: uncommitted, pull (behind), push (ahead) */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {/* 1. Uncommitted working tree changes */}
+                        {hasUncommitted && (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-amber-950/80 border border-amber-800/60 text-amber-300"
+                            title="Uncommitted changes in working tree"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                            <span>dirty</span>
+                          </span>
+                        )}
+
+                        {/* 2. New changes to pull (behind remote) */}
+                        {behindCount > 0 && (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-sky-950/80 border border-sky-800/60 text-sky-400"
+                            title={`${behindCount} commit${behindCount > 1 ? "s" : ""} to pull from remote`}
+                          >
+                            <ArrowDown className="w-2.5 h-2.5 text-sky-400" />
+                            <span>{behindCount}</span>
+                          </span>
+                        )}
+
+                        {/* 3. Changes committed but not pushed (ahead of remote) */}
+                        {aheadCount > 0 && (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-emerald-950/80 border border-emerald-800/60 text-emerald-300"
+                            title={`${aheadCount} commit${aheadCount > 1 ? "s" : ""} to push to remote`}
+                          >
+                            <ArrowUp className="w-2.5 h-2.5 text-emerald-400" />
+                            <span>{aheadCount}</span>
+                          </span>
+                        )}
+
+                        {/* HEAD badge if current */}
+                        {isCurrent && (
+                          <span className="text-[10px] text-sky-400/80 font-mono font-semibold">HEAD</span>
+                        )}
+
+                        {/* Non-current checkout & delete actions on hover */}
+                        {!isCurrent && (
+                          <div className="flex items-center gap-1">
                             <span className="text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 hover:text-sky-300 transition-opacity">
                               checkout
                             </span>
@@ -353,7 +484,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>
-                          </>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -434,8 +565,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                     <div
                       key={branch.name}
                       onClick={() => checkoutBranch(tab.id, branch.shorthand)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({
+                          branch,
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }}
                       className="group flex items-center justify-between px-2 py-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800/60 cursor-pointer transition-colors"
-                      title={`Click to checkout local branch from '${branch.shorthand}'`}
+                      title={`Click to checkout local branch from '${branch.shorthand}' (right-click for actions)`}
                     >
                       <div className="flex items-center gap-2 truncate">
                         <Globe className="w-3 h-3 text-indigo-400 flex-shrink-0" />
@@ -554,6 +694,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
           </button>
         )}
       </div>
+
+      {/* Floating Branch Context Menu */}
+      {contextMenu && (
+        <BranchContextMenu
+          branch={contextMenu.branch}
+          currentBranch={currentBranch}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          onCheckout={handleCheckoutBranch}
+          onPull={handlePullBranch}
+          onPush={handlePushBranch}
+          onFetch={handleFetch}
+          onMerge={handleMergeBranch}
+          onCreateBranchFrom={(b) => {
+            setCreateBranchBase(b);
+            setIsAddingBranch(true);
+            setSectionsOpen((prev) => ({ ...prev, branches: true }));
+          }}
+          onDelete={(b) => handleDeleteBranch(b.shorthand, b.is_remote)}
+          onOpenPr={(b) => createPullRequestInBrowser(tab.id, b.shorthand)}
+        />
+      )}
     </aside>
   );
 };

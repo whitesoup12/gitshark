@@ -5,9 +5,11 @@ import {
   setCustomGitPathIpc,
   validateGitPathIpc,
   pickGitExecutable,
+  setDiffDebounceDelayIpc,
 } from "@/lib/ipc";
 
 const STORAGE_CUSTOM_GIT_PATH = "gitshark_custom_git_path";
+const STORAGE_DIFF_REFRESH_DELAY = "gitshark_diff_refresh_delay";
 
 interface SettingsState {
   isSettingsOpen: boolean;
@@ -18,12 +20,14 @@ interface SettingsState {
   isTestingPath: boolean;
   testResult: { valid: boolean; message: string } | null;
   saveMessage: { success: boolean; message: string } | null;
+  diffRefreshDelayMs: number;
 
   // Actions
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   setActiveTab: (tab: SettingsTab) => void;
   setCustomPathInput: (input: string) => void;
+  setDiffRefreshDelayMs: (delayMs: number) => Promise<void>;
   loadGitInfo: () => Promise<void>;
   browseForGitExecutable: () => Promise<void>;
   testPath: (path: string) => Promise<void>;
@@ -41,6 +45,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   isTestingPath: false,
   testResult: null,
   saveMessage: null,
+  diffRefreshDelayMs: 1500,
 
   openSettings: (tab = "git") => {
     set({
@@ -62,6 +67,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setCustomPathInput: (input: string) => {
     set({ customPathInput: input, testResult: null, saveMessage: null });
+  },
+
+  setDiffRefreshDelayMs: async (delayMs: number) => {
+    const clamped = Math.max(200, Math.min(10000, delayMs));
+    localStorage.setItem(STORAGE_DIFF_REFRESH_DELAY, String(clamped));
+    set({ diffRefreshDelayMs: clamped });
+    try {
+      await setDiffDebounceDelayIpc(clamped);
+    } catch (err) {
+      console.error("Failed to sync debounce delay to Tauri backend:", err);
+    }
   },
 
   loadGitInfo: async () => {
@@ -159,6 +175,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (savedCustomPath && savedCustomPath.trim().length > 0) {
         await setCustomGitPathIpc(savedCustomPath.trim());
       }
+
+      const savedDelay = localStorage.getItem(STORAGE_DIFF_REFRESH_DELAY);
+      if (savedDelay) {
+        const parsed = parseInt(savedDelay, 10);
+        if (!isNaN(parsed) && parsed >= 200) {
+          set({ diffRefreshDelayMs: parsed });
+          await setDiffDebounceDelayIpc(parsed);
+        }
+      } else {
+        await setDiffDebounceDelayIpc(1500);
+      }
+
       await get().loadGitInfo();
     } catch (e) {
       console.warn("Failed to initialize settings from localStorage:", e);

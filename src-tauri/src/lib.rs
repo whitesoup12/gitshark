@@ -52,11 +52,13 @@ pub fn run() {
             commands::unstage_all_files,
             commands::stage_hunk,
             commands::discard_file_changes,
+            commands::discard_all_unstaged_changes,
             commands::get_file_diff,
             commands::execute_git_commit,
             commands::execute_git_push,
             commands::execute_git_pull,
             commands::execute_git_fetch,
+            commands::execute_git_merge,
             commands::cancel_active_process,
             commands::get_repo_hooks,
             commands::list_worktrees,
@@ -82,6 +84,10 @@ pub fn run() {
             commands::get_git_binary_info,
             commands::validate_git_path,
             commands::set_custom_git_path,
+            commands::set_diff_debounce_delay,
+            commands::get_diff_debounce_delay,
+            commands::get_repository_remote_url,
+            commands::open_in_browser,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

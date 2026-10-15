@@ -55,6 +55,102 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [diffViewMode, setDiffViewMode] = useState<"unified" | "split">("unified");
 
+  // Vertical panel height resizing
+  const [inspectorHeight, setInspectorHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("gitshark_commit_inspector_height");
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 160 && parsed <= 900) {
+        return parsed;
+      }
+    }
+    return 288;
+  });
+  const [isResizingHeight, setIsResizingHeight] = useState(false);
+
+  const handleHeightResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingHeight(true);
+    const startY = e.clientY;
+    const startHeight = inspectorHeight;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startY - moveEvent.clientY;
+      const maxHeight = Math.round(window.innerHeight * 0.85);
+      const newHeight = Math.min(Math.max(startHeight + delta, 160), maxHeight);
+      setInspectorHeight(newHeight);
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      setIsResizingHeight(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      const delta = startY - upEvent.clientY;
+      const maxHeight = Math.round(window.innerHeight * 0.85);
+      const finalHeight = Math.min(Math.max(startHeight + delta, 160), maxHeight);
+      localStorage.setItem("gitshark_commit_inspector_height", String(finalHeight));
+    };
+
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleResetHeight = () => {
+    setInspectorHeight(288);
+    localStorage.setItem("gitshark_commit_inspector_height", "288");
+  };
+
+  // Horizontal left column width resizing
+  const [leftColWidth, setLeftColWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("gitshark_commit_inspector_left_width");
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 200 && parsed <= 600) {
+        return parsed;
+      }
+    }
+    return 320;
+  });
+  const [isResizingLeftCol, setIsResizingLeftCol] = useState(false);
+
+  const handleLeftColResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingLeftCol(true);
+    const startX = e.clientX;
+    const startWidth = leftColWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(Math.max(startWidth + delta, 200), 600);
+      setLeftColWidth(newWidth);
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      setIsResizingLeftCol(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      const delta = upEvent.clientX - startX;
+      const finalWidth = Math.min(Math.max(startWidth + delta, 200), 600);
+      localStorage.setItem("gitshark_commit_inspector_left_width", String(finalWidth));
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleResetLeftCol = () => {
+    setLeftColWidth(320);
+    localStorage.setItem("gitshark_commit_inspector_left_width", "320");
+  };
+
   // Load commit details (changed files + stats) whenever commit hash changes
   useEffect(() => {
     setSelectedFile(null);
@@ -181,10 +277,23 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
 
   return (
     <div
-      className={`${
-        isExpanded ? "h-[58vh]" : "h-72"
-      } border-t border-shark-800 bg-shark-900/95 flex flex-col text-xs select-none z-10 transition-all duration-200`}
+      style={{
+        height: isExpanded ? "65vh" : `${inspectorHeight}px`,
+      }}
+      className={`border-t border-shark-800 bg-shark-900/95 flex flex-col text-xs select-none z-10 relative flex-shrink-0 ${
+        isResizingHeight ? "" : "transition-[height] duration-200"
+      }`}
     >
+      {/* Draggable top resize handle for commit inspector */}
+      <div
+        onMouseDown={handleHeightResizeMouseDown}
+        onDoubleClick={handleResetHeight}
+        className="absolute -top-1 left-0 w-full h-2.5 cursor-row-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+        title="Drag to resize inspector height (Double-click to reset)"
+      >
+        <div className="h-[1px] w-full my-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
+      </div>
+
       {/* Header Bar */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-shark-800 bg-shark-950/70 flex-shrink-0">
         <div className="flex items-center gap-2.5 truncate">
@@ -311,7 +420,22 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
       {/* Main Inspector Body */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Column: Author, Message, Parents */}
-        <div className="w-80 border-r border-shark-800 p-3 overflow-y-auto space-y-3.5 flex-shrink-0 bg-shark-950/20 text-slate-400 text-[11px]">
+        <div
+          style={{ width: `${leftColWidth}px` }}
+          className={`border-r border-shark-800 p-3 overflow-y-auto space-y-3.5 flex-shrink-0 bg-shark-950/20 text-slate-400 text-[11px] relative ${
+            isResizingLeftCol ? "" : "transition-[width] duration-150"
+          }`}
+        >
+          {/* Draggable vertical divider */}
+          <div
+            onMouseDown={handleLeftColResizeMouseDown}
+            onDoubleClick={handleResetLeftCol}
+            className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+            title="Drag to resize commit metadata panel (Double-click to reset)"
+          >
+            <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
+          </div>
+
           {/* Summary & Body */}
           <div className="space-y-1">
             <div className="font-semibold text-slate-200 text-xs leading-snug">

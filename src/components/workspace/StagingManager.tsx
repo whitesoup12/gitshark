@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { FileStatusItem, WorkingTreeStatus, Tab } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import {
@@ -26,6 +26,7 @@ interface StagingManagerProps {
   onStageAll: () => void;
   onUnstageAll: () => void;
   onDiscardFile: (path: string) => void;
+  onDiscardAll?: () => void;
   onRefresh: () => void;
   isLoading?: boolean;
 }
@@ -41,6 +42,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
   onStageAll,
   onUnstageAll,
   onDiscardFile,
+  onDiscardAll,
   onRefresh,
   isLoading = false,
 }) => {
@@ -64,6 +66,27 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
   const [stashMessage, setStashMessage] = useState("");
   const [stashIncludeUntracked, setStashIncludeUntracked] = useState(true);
   const [isSubmittingStash, setIsSubmittingStash] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    item?: FileStatusItem;
+    isStaged?: boolean;
+    isUnstagedHeader?: boolean;
+    isStagedHeader?: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleClose = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("mousedown", handleClose);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handleClose);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   // Split view ratio for Staged vs Unstaged files (default 50/50)
   const [splitRatio, setSplitRatio] = useState<number>(50);
@@ -90,6 +113,53 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  // Resizable panel width with persistence
+  const [stagingWidth, setStagingWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("gitshark_staging_width");
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 240 && parsed <= 850) {
+        return parsed;
+      }
+    }
+    return 320;
+  });
+  const [isResizingStaging, setIsResizingStaging] = useState(false);
+
+  const handleHorizontalResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingStaging(true);
+    const startX = e.clientX;
+    const startWidth = stagingWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(Math.max(startWidth + delta, 240), 850);
+      setStagingWidth(newWidth);
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      setIsResizingStaging(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      const delta = upEvent.clientX - startX;
+      const finalWidth = Math.min(Math.max(startWidth + delta, 240), 850);
+      localStorage.setItem("gitshark_staging_width", String(finalWidth));
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleResetHorizontalWidth = () => {
+    setStagingWidth(320);
+    localStorage.setItem("gitshark_staging_width", "320");
   };
 
   const isCommitting = tab?.hookState?.status === "running";
@@ -126,6 +196,16 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
       <div
         key={`${isStaged ? "staged" : "unstaged"}-${item.path}`}
         onClick={() => onSelectFile(item.path, isStaged)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            item,
+            isStaged,
+          });
+        }}
         className={`group flex items-center justify-between px-2.5 py-1.5 text-xs rounded transition-colors cursor-pointer select-none ${
           isSelected
             ? "bg-sky-500/15 text-sky-200 border-l-2 border-sky-400 font-medium"
@@ -162,7 +242,9 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDiscardFile(item.path);
+                  if (window.confirm(`Are you sure you want to discard changes for "${item.path}"?`)) {
+                    onDiscardFile(item.path);
+                  }
                 }}
                 className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-750 transition-colors"
                 title="Discard changes"
@@ -227,7 +309,22 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
   };
 
   return (
-    <aside className="w-80 flex flex-col bg-shark-900 border-r border-shark-800 h-full select-none text-xs">
+    <aside
+      style={{ width: `${stagingWidth}px` }}
+      className={`flex flex-col bg-shark-900 border-r border-shark-800 h-full select-none text-xs relative flex-shrink-0 ${
+        isResizingStaging ? "" : "transition-[width] duration-150"
+      }`}
+    >
+      {/* Draggable resize handle between StagingManager and DiffViewer */}
+      <div
+        onMouseDown={handleHorizontalResizeMouseDown}
+        onDoubleClick={handleResetHorizontalWidth}
+        className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+        title="Drag to resize file list panel (Double-click to reset)"
+      >
+        <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
+      </div>
+
       {/* Header bar */}
       <div className="flex items-center justify-between px-3 h-10 border-b border-shark-800 bg-shark-950/40">
         <span className="font-semibold text-slate-200">Changes & Staging</span>
@@ -318,7 +415,18 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           className="flex flex-col min-h-0 overflow-hidden"
         >
           {/* Staged Header */}
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-shark-800 bg-shark-950/40 select-none flex-shrink-0">
+          <div
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                isStagedHeader: true,
+              });
+            }}
+            className="flex items-center justify-between px-3 py-1.5 border-b border-shark-800 bg-shark-950/40 select-none flex-shrink-0 cursor-pointer"
+          >
             <div className="flex items-center gap-1.5 font-semibold text-slate-300 text-[11px]">
               <span>Staged Changes</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono">
@@ -362,7 +470,18 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           className="flex flex-col min-h-0 overflow-hidden"
         >
           {/* Unstaged Header */}
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-shark-800 bg-shark-950/40 select-none flex-shrink-0">
+          <div
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                isUnstagedHeader: true,
+              });
+            }}
+            className="flex items-center justify-between px-3 py-1.5 border-b border-shark-800 bg-shark-950/40 select-none flex-shrink-0 cursor-pointer"
+          >
             <div className="flex items-center gap-1.5 font-semibold text-slate-300 text-[11px]">
               <span>Unstaged Changes</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-950/70 border border-amber-800/60 text-amber-300 font-mono">
@@ -370,12 +489,34 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
               </span>
             </div>
             {totalUnstaged > 0 && (
-              <button
-                onClick={onStageAll}
-                className="text-[11px] text-sky-400 hover:text-sky-300 hover:underline"
-              >
-                Stage All
-              </button>
+              <div className="flex items-center gap-2">
+                {onDiscardAll && (
+                  <button
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Are you sure you want to discard all ${totalUnstaged} unstaged change${
+                            totalUnstaged === 1 ? "" : "s"
+                          }? This will permanently discard modifications and delete untracked files.`
+                        )
+                      ) {
+                        onDiscardAll();
+                      }
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-rose-400 hover:underline transition-colors"
+                    title="Discard all unstaged changes and delete untracked files"
+                  >
+                    Discard All
+                  </button>
+                )}
+                {onDiscardAll && <span className="text-slate-600 text-[10px]">|</span>}
+                <button
+                  onClick={onStageAll}
+                  className="text-[11px] text-sky-400 hover:text-sky-300 hover:underline"
+                >
+                  Stage All
+                </button>
+              </div>
             )}
           </div>
 
@@ -516,6 +657,115 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           <span>{stagedCount + totalUnstaged} total files modified</span>
         </div>
       </div>
+
+      {/* Floating Staging Context Menu */}
+      {contextMenu && (
+        <div
+          style={{
+            top: Math.min(contextMenu.y, window.innerHeight - 150),
+            left: Math.min(contextMenu.x, window.innerWidth - 220),
+          }}
+          className="fixed z-50 w-56 bg-shark-900/95 border border-shark-750/90 rounded-lg shadow-2xl py-1 text-xs text-slate-200 select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.item && !contextMenu.isStaged && (
+            <>
+              <div className="px-3 py-1 text-[10px] font-mono text-slate-400 border-b border-shark-800 truncate bg-shark-950/40">
+                {contextMenu.item.path}
+              </div>
+              <button
+                onClick={() => {
+                  onStageFile(contextMenu.item!.path);
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-left transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Stage File</span>
+              </button>
+              <button
+                onClick={() => {
+                  const p = contextMenu.item!.path;
+                  setContextMenu(null);
+                  if (window.confirm(`Are you sure you want to discard changes for "${p}"?`)) {
+                    onDiscardFile(p);
+                  }
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-950/40 text-rose-300 text-left transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Discard Changes...</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.item && contextMenu.isStaged && (
+            <>
+              <div className="px-3 py-1 text-[10px] font-mono text-slate-400 border-b border-shark-800 truncate bg-shark-950/40">
+                {contextMenu.item.path}
+              </div>
+              <button
+                onClick={() => {
+                  onUnstageFile(contextMenu.item!.path);
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-left transition-colors"
+              >
+                <Minus className="w-3.5 h-3.5 text-slate-400" />
+                <span>Unstage File</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.isUnstagedHeader && totalUnstaged > 0 && (
+            <>
+              <button
+                onClick={() => {
+                  onStageAll();
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-left transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Stage All Changes</span>
+              </button>
+              {onDiscardAll && (
+                <button
+                  onClick={() => {
+                    setContextMenu(null);
+                    if (
+                      window.confirm(
+                        `Are you sure you want to discard all ${totalUnstaged} unstaged change${
+                          totalUnstaged === 1 ? "" : "s"
+                        }? This will permanently discard modifications and delete untracked files.`
+                      )
+                    ) {
+                      onDiscardAll();
+                    }
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-950/40 text-rose-300 text-left transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Discard All Unstaged Changes...</span>
+                </button>
+              )}
+            </>
+          )}
+
+          {contextMenu.isStagedHeader && stagedCount > 0 && (
+            <button
+              onClick={() => {
+                onUnstageAll();
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-left transition-colors"
+            >
+              <Minus className="w-3.5 h-3.5 text-slate-400" />
+              <span>Unstage All Changes</span>
+            </button>
+          )}
+        </div>
+      )}
     </aside>
   );
 };

@@ -31,6 +31,58 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
   const [isRunning, setIsRunning] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Terminal height resizing with persistence
+  const [terminalHeight, setTerminalHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("gitshark_terminal_height");
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 120 && parsed <= 800) {
+        return parsed;
+      }
+    }
+    return 256;
+  });
+  const [isResizingTerminal, setIsResizingTerminal] = useState(false);
+
+  const handleTerminalResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingTerminal(true);
+    const startY = e.clientY;
+    const startHeight = terminalHeight;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startY - moveEvent.clientY;
+      const maxHeight = Math.round(window.innerHeight * 0.85);
+      const newHeight = Math.min(Math.max(startHeight + delta, 120), maxHeight);
+      setTerminalHeight(newHeight);
+      fitAddonRef.current?.fit();
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      setIsResizingTerminal(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      const delta = startY - upEvent.clientY;
+      const maxHeight = Math.round(window.innerHeight * 0.85);
+      const finalHeight = Math.min(Math.max(startHeight + delta, 120), maxHeight);
+      localStorage.setItem("gitshark_terminal_height", String(finalHeight));
+      setTimeout(() => fitAddonRef.current?.fit(), 50);
+    };
+
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleResetTerminalHeight = () => {
+    setTerminalHeight(256);
+    localStorage.setItem("gitshark_terminal_height", "256");
+    setTimeout(() => fitAddonRef.current?.fit(), 50);
+  };
+
   const repoId = tab.repoId;
 
   // Initialize xterm and addons
@@ -138,10 +190,23 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
 
   return (
     <div
-      className={`flex flex-col bg-shark-950 border-t border-shark-800 transition-all duration-200 z-10 ${
-        isExpanded ? "h-[65%]" : "h-64"
+      style={{
+        height: isExpanded ? "65%" : `${terminalHeight}px`,
+      }}
+      className={`flex flex-col bg-shark-950 border-t border-shark-800 z-10 relative flex-shrink-0 ${
+        isResizingTerminal ? "" : "transition-[height] duration-200"
       }`}
     >
+      {/* Draggable top resize handle for terminal */}
+      <div
+        onMouseDown={handleTerminalResizeMouseDown}
+        onDoubleClick={handleResetTerminalHeight}
+        className="absolute -top-1 left-0 w-full h-2.5 cursor-row-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+        title="Drag to resize terminal height (Double-click to reset)"
+      >
+        <div className="h-[1px] w-full my-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
+      </div>
+
       {/* Terminal Drawer Header Toolbar */}
       <div className="flex items-center justify-between px-3 h-8 bg-shark-900 border-b border-shark-800 select-none">
         <div className="flex items-center gap-2">

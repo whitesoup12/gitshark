@@ -35,3 +35,59 @@
 .xterm-viewport {
   background-color: transparent !important;
 }
+
+/* Shark swim animation across the screen */
+@keyframes sharkSwimAcross {
+  0% {
+    transform: translateX(-260px) translateY(0px) rotate(0deg);
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+    transform: translateX(-40px) translateY(-5px) rotate(-1.5deg);
+  }
+  25% {
+    transform: translateX(25vw) translateY(8px) rotate(2deg);
+  }
+  45% {
+    transform: translateX(48vw) translateY(-8px) rotate(-2deg);
+  }
+  70% {
+    transform: translateX(72vw) translateY(6px) rotate(1.5deg);
+  }
+  92% {
+    opacity: 1;
+    transform: translateX(calc(100vw + 60px)) translateY(-2px) rotate(-0.5deg);
+  }
+  100% {
+    transform: translateX(calc(100vw + 260px)) translateY(0px) rotate(0deg);
+    opacity: 0;
+  }
+}
+
+.animate-shark-swim {
+  animation: sharkSwimAcross 3.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+/* Floating oceanic commit bubbles */
+@keyframes bubbleRiseAndPop {
+  0% {
+    transform: translateY(0px) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  80% {
+    opacity: 0.95;
+    transform: translateY(-90px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-130px) scale(1.4);
+  }
+}
+
+.animate-bubble-float {
+  animation: bubbleRiseAndPop 2.4s ease-out forwards;
+}
