@@ -4,21 +4,30 @@ import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { APP_VERSION } from "@/constants/version";
 
+import { useSharkStore } from "@/store/useSharkStore";
+
 export const EmptyWorkspace: React.FC = () => {
   const { openRepositoryTab, createEmptyTab, setCloneModalOpen } = useWorkspaceStore();
+  const { triggerCelebration } = useSharkStore();
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 bg-shark-950 select-none">
       <div className="max-w-md w-full text-center space-y-6">
         {/* Brand Icon & Heading */}
         <div className="space-y-4">
-          <GitSharkLogo
-            size="2xl"
-            withBackground={true}
-            withGlow={true}
-            animated={true}
-            className="mx-auto shadow-2xl shadow-sky-950/80 transition-transform hover:scale-105 duration-300 cursor-default"
-          />
+          <div
+            onClick={() => triggerCelebration("swim", "Welcome to the GitShark Seas! 🦈")}
+            className="cursor-pointer inline-block group"
+            title="Click to release the shark! 🦈"
+          >
+            <GitSharkLogo
+              size="2xl"
+              withBackground={true}
+              withGlow={true}
+              animated={true}
+              className="mx-auto shadow-2xl shadow-sky-950/80 transition-transform group-hover:scale-105 duration-300"
+            />
+          </div>
           <div className="flex items-center justify-center gap-2">
             <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-sky-400 via-teal-300 to-sky-100 bg-clip-text text-transparent">
               Welcome to GitShark

@@ -7,6 +7,7 @@ import {
   Minus,
   FileCode,
   AlertCircle,
+  RotateCw,
 } from "lucide-react";
 
 interface DiffViewerProps {
@@ -17,6 +18,7 @@ interface DiffViewerProps {
   onDiscardHunk?: (patch: string) => void;
   onToggleStageFile: () => void;
   isLoading?: boolean;
+  isRefreshing?: boolean;
 }
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
@@ -27,10 +29,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onDiscardHunk,
   onToggleStageFile,
   isLoading = false,
+  isRefreshing = false,
 }) => {
   const [viewMode, setViewMode] = useState<"unified" | "split">("unified");
 
-  if (isLoading) {
+  if (isLoading && !diff) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-shark-950 text-slate-400 gap-2">
         <div className="w-5 h-5 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
@@ -102,6 +105,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               </span>
             )}
           </div>
+
+          {(isRefreshing || isLoading) && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-sky-950/80 border border-sky-800/50 text-[10px] text-sky-400 font-mono animate-pulse">
+              <RotateCw className="w-2.5 h-2.5 animate-spin" />
+              <span>Updating</span>
+            </span>
+          )}
         </div>
 
         {/* Right: View Mode Toggle & Primary Stage/Unstage Action */}

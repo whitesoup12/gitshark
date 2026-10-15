@@ -82,6 +82,12 @@ pub struct BranchItem {
     pub is_remote: bool,
     pub upstream: Option<String>,
     pub target_commit: Option<String>,
+    #[serde(default)]
+    pub ahead: usize,
+    #[serde(default)]
+    pub behind: usize,
+    #[serde(default)]
+    pub has_uncommitted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,6 +386,38 @@ pub fn discard_file_changes(repo: &Repository, path: &str) -> Result<(), String>
     checkout.path(path).force();
     repo.checkout_head(Some(&mut checkout))
         .map_err(|e| format!("Failed to checkout file: {e}"))?;
+
+    Ok(())
+}
+
+/// Discard all unstaged working directory changes (revert tracked unstaged changes to index, delete untracked files)
+pub fn discard_all_unstaged_changes(repo: &Repository) -> Result<(), String> {
+    let workdir = repo.workdir().ok_or("Bare repository")?;
+
+    // 1. Remove untracked files
+    let mut status_opts = StatusOptions::new();
+    status_opts.include_untracked(true);
+    let statuses = repo.statuses(Some(&mut status_opts)).map_err(|e| e.to_string())?;
+
+    for entry in statuses.iter() {
+        let s = entry.status();
+        if s.contains(Status::WT_NEW) {
+            if let Some(path) = entry.path() {
+                let full_path = workdir.join(path);
+                if full_path.is_file() || full_path.is_symlink() {
+                    let _ = fs::remove_file(&full_path);
+                } else if full_path.is_dir() {
+                    let _ = fs::remove_dir_all(&full_path);
+                }
+            }
+        }
+    }
+
+    // 2. Checkout index to restore modified/deleted working directory files to match index
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_index(None, Some(&mut checkout))
+        .map_err(|e| format!("Failed to checkout index: {e}"))?;
 
     Ok(())
 }
@@ -1187,6 +1225,18 @@ pub fn get_repo_branches(repo: &Repository) -> Result<RepoBranches, String> {
     let mut local = Vec::new();
     let mut remote = Vec::new();
 
+    let repo_is_dirty = {
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(false)
+            .include_ignored(false);
+        if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+            !statuses.is_empty()
+        } else {
+            false
+        }
+    };
+
     let branches = repo
         .branches(None)
         .map_err(|e| format!("Failed to read branches: {e}"))?;
@@ -1199,13 +1249,24 @@ pub fn get_repo_branches(repo: &Repository) -> Result<RepoBranches, String> {
         let is_head = !is_remote && head_shorthand.as_deref() == Some(&shorthand);
         let target_commit = branch.get().target().map(|oid| oid.to_string());
 
-        let upstream = if !is_remote {
-            branch.upstream().ok().and_then(|u| {
-                u.get().shorthand().map(String::from)
-            })
+        let (upstream, ahead, behind) = if !is_remote {
+            if let Ok(upstream_branch) = branch.upstream() {
+                let upstream_name = upstream_branch.get().shorthand().map(String::from);
+                let (a, b) = match (branch.get().target(), upstream_branch.get().target()) {
+                    (Some(local_oid), Some(upstream_oid)) => {
+                        repo.graph_ahead_behind(local_oid, upstream_oid).unwrap_or((0, 0))
+                    }
+                    _ => (0, 0),
+                };
+                (upstream_name, a, b)
+            } else {
+                (None, 0, 0)
+            }
         } else {
-            None
+            (None, 0, 0)
         };
+
+        let has_uncommitted = is_head && repo_is_dirty;
 
         let item = BranchItem {
             name,
@@ -1214,6 +1275,9 @@ pub fn get_repo_branches(repo: &Repository) -> Result<RepoBranches, String> {
             is_remote,
             upstream,
             target_commit,
+            ahead,
+            behind,
+            has_uncommitted,
         };
 
         if is_remote {

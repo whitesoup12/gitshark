@@ -18,6 +18,7 @@ import {
   executeGitPushIpc,
   executeGitPullIpc,
   executeGitFetchIpc,
+  executeGitMergeIpc,
   cancelActiveProcessIpc,
   getRepoHooksIpc,
   listWorktreesIpc,
@@ -40,6 +41,7 @@ import {
   listenToTerminalData,
 } from "@/lib/ipc";
 import { GitTagItem } from "@/types";
+import { useSharkStore } from "@/store/useSharkStore";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -70,6 +72,7 @@ interface WorkspaceState {
   ) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
+  executeMerge: (tabId: string, branch: string) => Promise<boolean>;
   cancelActiveProcess: (tabId: string) => Promise<void>;
   retryLastHook: (tabId: string) => Promise<void>;
   dismissHookStatus: (tabId: string) => void;
@@ -463,6 +466,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
+            useSharkStore.getState().triggerCelebration("swim", "Commit Chomped! 🦈");
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -595,6 +599,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
+            useSharkStore.getState().triggerCelebration("swim", "Pushed to Remote Seas! 🌊");
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -880,6 +885,125 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             status: "failed",
             elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
             lastCommand: "pull",
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
+  },
+
+  executeMerge: async (tabId: string, branch: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage: "committing",
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "merge",
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    if (activeTimers.has(tabId)) {
+      clearInterval(activeTimers.get(tabId)!);
+      activeTimers.delete(tabId);
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const currentTab = get().tabs.find((t) => t.id === tabId);
+      if (currentTab?.hookState && currentTab.hookState.status === "running") {
+        get().updateTab(tabId, {
+          hookState: {
+            ...currentTab.hookState,
+            elapsedSeconds: Number(elapsed.toFixed(1)),
+          },
+        });
+      }
+    }, 100);
+    activeTimers.set(tabId, timer);
+
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (activeTimers.has(tabId)) {
+          clearInterval(activeTimers.get(tabId)!);
+          activeTimers.delete(tabId);
+        }
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "committing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "merge",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "committing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "merge",
+                exitCode: payload.exit_code ?? 1,
+                error: `Merge failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitMergeIpc(repoId, branch);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage: "committing",
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "merge",
             exitCode: 1,
             error: err instanceof Error ? err.message : String(err),
           },

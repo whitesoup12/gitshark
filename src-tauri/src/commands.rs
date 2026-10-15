@@ -183,6 +183,20 @@ pub async fn discard_file_changes(
 }
 
 #[tauri::command]
+pub async fn discard_all_unstaged_changes(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let repo_guard = session.repo.lock();
+    git::discard_all_unstaged_changes(&repo_guard)
+}
+
+#[tauri::command]
 pub async fn get_file_diff(
     state: State<'_, AppRepoState>,
     repo_id: String,
@@ -301,6 +315,7 @@ use std::os::windows::process::CommandExt;
 /// Creates a standard `std::process::Command` configured with `CREATE_NO_WINDOW` (0x08000000)
 /// on Windows. This prevents brief, distracting terminal/command prompt window flashes
 /// when GitShark executes Git or background processes from a GUI application.
+#[allow(unused_mut)]
 fn create_silent_command<S: AsRef<std::ffi::OsStr>>(program: S) -> std::process::Command {
     let mut cmd = std::process::Command::new(program);
     #[cfg(windows)]
@@ -708,25 +723,129 @@ pub async fn execute_git_pull(
     branch: Option<String>,
     rebase: Option<bool>,
 ) -> Result<(), String> {
-    let (pty_manager, workdir) = {
+    let (pty_manager, workdir, git_cmd, args) = {
         let registry = state.read();
         let session = registry
             .get(&repo_id)
             .ok_or_else(|| format!("Session not found: {repo_id}"))?;
-        (session.pty_manager.clone(), session.path.clone())
-    };
+        let repo = session.repo.lock();
 
-    let git_cmd = resolve_git_command();
-    let mut args = vec!["pull".to_string(), "--prune".to_string()];
-    if rebase.unwrap_or(false) {
-        args.push("--rebase".to_string());
-    }
-    if let Some(r) = remote {
-        args.push(r);
-        if let Some(b) = branch {
-            args.push(b);
+        let head_branch_name = repo.head().ok().and_then(|h| {
+            if h.is_branch() {
+                h.shorthand().map(String::from)
+            } else {
+                None
+            }
+        });
+
+        let target_branch = branch.or_else(|| head_branch_name.clone());
+        let is_current_head = match (&target_branch, &head_branch_name) {
+            (Some(tb), Some(hb)) => tb == hb,
+            _ => false,
+        };
+
+        let default_remote = repo
+            .remotes()
+            .ok()
+            .and_then(|r| r.get(0).map(String::from))
+            .unwrap_or_else(|| "origin".to_string());
+
+        let mut cmd_args = Vec::new();
+
+        if is_current_head || target_branch.is_none() {
+            // Pulling the currently checked out branch (HEAD)
+            cmd_args.push("pull".to_string());
+            cmd_args.push("--prune".to_string());
+            if rebase.unwrap_or(false) {
+                cmd_args.push("--rebase".to_string());
+            }
+
+            let mut branch_has_upstream = false;
+            let mut resolved_remote = remote.clone();
+            let mut resolved_merge_branch = None;
+
+            if let Some(ref cur) = head_branch_name {
+                if let Ok(mut local_b) = repo.find_branch(cur, git2::BranchType::Local) {
+                    if let Ok(_upstream) = local_b.upstream() {
+                        branch_has_upstream = true;
+                        if let Some(r_name) = local_b
+                            .get()
+                            .name()
+                            .and_then(|rn| repo.branch_upstream_remote(rn).ok())
+                            .and_then(|b| b.as_str().map(String::from))
+                        {
+                            resolved_remote = Some(r_name);
+                        }
+                    } else {
+                        // Current branch has no upstream tracking configured yet
+                        let remote_ref_name = format!("{default_remote}/{cur}");
+                        if repo.find_branch(&remote_ref_name, git2::BranchType::Remote).is_ok() {
+                            let _ = local_b.set_upstream(Some(&remote_ref_name));
+                            branch_has_upstream = true;
+                        }
+                        resolved_merge_branch = Some(cur.clone());
+                    }
+                }
+            }
+
+            if !branch_has_upstream {
+                let r = resolved_remote.unwrap_or(default_remote);
+                let b = resolved_merge_branch.or(head_branch_name).unwrap_or_else(|| "HEAD".to_string());
+                cmd_args.push(r);
+                cmd_args.push(b);
+            } else if let Some(r) = resolved_remote {
+                cmd_args.push(r);
+                if let Some(b) = resolved_merge_branch {
+                    cmd_args.push(b);
+                }
+            }
+        } else {
+            // Pulling a NON-checked-out branch (Issue #5)
+            // Fast-forwards the local branch reference from remote without switching branches:
+            // git fetch <remote> <remote_ref>:<local_ref>
+            let local_branch = target_branch.unwrap();
+            let mut remote_name = remote.clone();
+            let mut remote_branch = local_branch.clone();
+
+            if let Ok(mut local_b) = repo.find_branch(&local_branch, git2::BranchType::Local) {
+                if let Some(ref_name) = local_b.get().name() {
+                    if let Ok(buf) = repo.branch_upstream_remote(ref_name) {
+                        if let Some(s) = buf.as_str() {
+                            remote_name = Some(s.to_string());
+                        }
+                    }
+                    if let Ok(buf) = repo.branch_upstream_merge(ref_name) {
+                        if let Some(s) = buf.as_str() {
+                            let short = s.strip_prefix("refs/heads/").unwrap_or(s);
+                            remote_branch = short.to_string();
+                        }
+                    }
+                }
+
+                // If upstream wasn't set, check if remote branch exists and configure tracking
+                let rem = remote_name.clone().unwrap_or_else(|| default_remote.clone());
+                let remote_ref_target = format!("{rem}/{remote_branch}");
+                if local_b.upstream().is_err()
+                    && repo.find_branch(&remote_ref_target, git2::BranchType::Remote).is_ok()
+                {
+                    let _ = local_b.set_upstream(Some(&remote_ref_target));
+                }
+            }
+
+            let rem = remote_name.unwrap_or(default_remote);
+            cmd_args.push("fetch".to_string());
+            cmd_args.push("--prune".to_string());
+            cmd_args.push(rem);
+            cmd_args.push(format!("{remote_branch}:{local_branch}"));
         }
-    }
+
+        (
+            session.pty_manager.clone(),
+            session.path.clone(),
+            resolve_git_command(),
+            cmd_args,
+        )
+    };
 
     pty_manager.spawn(
         repo_id,
@@ -765,6 +884,35 @@ pub async fn execute_git_fetch(
     } else {
         args.push("--all".to_string());
     }
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn execute_git_merge(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    branch: String,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let args = vec!["merge".to_string(), branch];
 
     pty_manager.spawn(
         repo_id,
@@ -1233,6 +1381,17 @@ pub async fn push_tag(
         30,
         app_handle,
     )
+}
+
+#[tauri::command]
+pub fn set_diff_debounce_delay(delay_ms: u64) -> Result<u64, String> {
+    crate::watcher::set_debounce_window_ms(delay_ms);
+    Ok(crate::watcher::get_debounce_window_ms())
+}
+
+#[tauri::command]
+pub fn get_diff_debounce_delay() -> Result<u64, String> {
+    Ok(crate::watcher::get_debounce_window_ms())
 }
 
 #[cfg(test)]

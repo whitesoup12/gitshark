@@ -22,6 +22,9 @@ export interface BranchItem {
   is_remote: boolean;
   upstream?: string | null;
   target_commit?: string | null;
+  ahead?: number;
+  behind?: number;
+  has_uncommitted?: boolean;
 }
 
 export interface RepoBranches {

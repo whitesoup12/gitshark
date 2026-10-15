@@ -390,6 +390,17 @@ export async function discardFileChangesIpc(repoId: string, path: string): Promi
 }
 
 /**
+ * Discard all unstaged working tree changes and delete untracked files
+ */
+export async function discardAllUnstagedChangesIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Discard all unstaged changes in: ${repoId}`);
+    return;
+  }
+  return await invoke<void>("discard_all_unstaged_changes", { repoId });
+}
+
+/**
  * Fetch line-by-line structured diff data for a file
  */
 export async function getFileDiffIpc(
@@ -506,6 +517,23 @@ export async function executeGitFetchIpc(
     repoId,
     remote,
     prune,
+  });
+}
+
+/**
+ * Execute native git merge in PTY streaming to active tab xterm
+ */
+export async function executeGitMergeIpc(
+  repoId: string,
+  branch: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git merge ${branch}`);
+    return;
+  }
+  return await invoke<void>("execute_git_merge", {
+    repoId,
+    branch,
   });
 }
 
@@ -709,6 +737,9 @@ export async function getRepoBranchesIpc(repoId: string): Promise<RepoBranches> 
           is_remote: false,
           upstream: "origin/main",
           target_commit: "mock-hash",
+          ahead: 0,
+          behind: 0,
+          has_uncommitted: false,
         },
       ],
       remote: [
@@ -1042,3 +1073,24 @@ export async function setCustomGitPathIpc(path: string | null): Promise<GitBinar
   }
   return await invoke<GitBinaryInfo>("set_custom_git_path", { path });
 }
+
+/**
+ * Set the filesystem watcher debounce delay window in milliseconds
+ */
+export async function setDiffDebounceDelayIpc(delayMs: number): Promise<number> {
+  if (!isTauriEnvironment()) {
+    return delayMs;
+  }
+  return await invoke<number>("set_diff_debounce_delay", { delayMs });
+}
+
+/**
+ * Get the current filesystem watcher debounce delay window in milliseconds
+ */
+export async function getDiffDebounceDelayIpc(): Promise<number> {
+  if (!isTauriEnvironment()) {
+    return 1500;
+  }
+  return await invoke<number>("get_diff_debounce_delay");
+}
+

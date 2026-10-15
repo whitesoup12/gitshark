@@ -13,8 +13,11 @@ import {
   ExternalLink,
   Copy,
   Check,
+  Sparkles,
+  Waves,
 } from "lucide-react";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useSharkStore } from "@/store/useSharkStore";
 import { APP_VERSION } from "@/constants/version";
 import type { SettingsTab } from "@/types";
 
@@ -36,7 +39,17 @@ export const SettingsModal: React.FC = () => {
     saveGitPath,
     resetToAutoDetected,
     loadGitInfo,
+    diffRefreshDelayMs,
+    setDiffRefreshDelayMs,
   } = useSettingsStore();
+
+  const {
+    celebrationsEnabled,
+    wisdomEnabled,
+    setCelebrationsEnabled,
+    setWisdomEnabled,
+    triggerCelebration,
+  } = useSharkStore();
 
   const [copied, setCopied] = useState(false);
 
@@ -284,6 +297,57 @@ export const SettingsModal: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Filesystem Watcher & Diff Refresh Delay */}
+                <div className="space-y-3 pt-4 border-t border-shark-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-200">
+                        Diff & Working Changes Auto-Refresh Delay
+                      </label>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Inactivity debounce window before auto-refreshing diffs and working tree status.
+                      </p>
+                    </div>
+                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800/40 font-semibold">
+                      {diffRefreshDelayMs >= 1000 ? `${(diffRefreshDelayMs / 1000).toFixed(1)}s` : `${diffRefreshDelayMs}ms`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-2 pt-1">
+                    {[
+                      { label: "500ms", value: 500, desc: "Fast" },
+                      { label: "1.0s", value: 1000, desc: "Responsive" },
+                      { label: "1.5s", value: 1500, desc: "AI Default" },
+                      { label: "2.5s", value: 2500, desc: "Heavy Bursts" },
+                      { label: "4.0s", value: 4000, desc: "Extended" },
+                    ].map((option) => {
+                      const isSelected = diffRefreshDelayMs === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setDiffRefreshDelayMs(option.value)}
+                          className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-center transition-all ${
+                            isSelected
+                              ? "bg-sky-600/20 border-sky-500/50 text-sky-300 ring-1 ring-sky-500/30"
+                              : "bg-shark-950 border-shark-800 text-slate-400 hover:text-slate-200 hover:border-shark-700"
+                          }`}
+                        >
+                          <span className="text-xs font-semibold font-mono">{option.label}</span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">{option.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-shark-950/60 border border-shark-800/70 text-[11px] text-slate-400 flex items-start gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-sky-400 flex-shrink-0 mt-0.5" />
+                    <span>
+                      <strong className="text-slate-300">AI Agent Optimization:</strong> When an AI coding assistant (e.g. Antigravity, Cursor, Claude Code) performs rapid multi-file writes, GitShark batches the changes into a single quiet-window refresh, preventing continuous UI flickering and diff unmounting.
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -341,6 +405,68 @@ export const SettingsModal: React.FC = () => {
                     </span>
                   </div>
                 </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-200 mb-1">Ocean Vibes & Celebrations</h3>
+                  <p className="text-xs text-slate-400">
+                    Interactive nautical delights, swimming sharks, and Git wisdom.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-shark-950 border border-shark-800 space-y-4">
+                  {/* Shark Celebrations Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Shark Celebrations</div>
+                      <div className="text-[11px] text-slate-500">
+                        Playful animated shark swim & glowing commit bubbles when commits and pushes succeed
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={celebrationsEnabled}
+                        onChange={(e) => setCelebrationsEnabled(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-shark-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Shark Wisdom Toggle */}
+                  <div className="flex items-center justify-between pt-3 border-t border-shark-850">
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Shark Wisdom</div>
+                      <div className="text-[11px] text-slate-500">
+                        Click the top-left GitShark logo anytime to reveal witty Git insights and deep sea tips
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={wisdomEnabled}
+                        onChange={(e) => setWisdomEnabled(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-shark-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Test Shark Swim Button */}
+                  <div className="pt-3 border-t border-shark-850 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-400">Preview the swimming shark animation:</span>
+                    <button
+                      onClick={() => {
+                        triggerCelebration("swim", "Swimming through your changes! 🦈");
+                        closeSettings();
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 text-sky-300 text-xs font-medium transition-colors"
+                    >
+                      <Waves className="w-3.5 h-3.5" />
+                      <span>Test Shark Swim 🦈</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -348,7 +474,14 @@ export const SettingsModal: React.FC = () => {
             {activeTab === "about" && (
               <div className="space-y-5">
                 <div className="p-5 rounded-xl bg-gradient-to-br from-shark-950 via-shark-900 to-sky-950/30 border border-shark-800 flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-600 to-blue-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-sky-600/30">
+                  <div
+                    onClick={() => {
+                      triggerCelebration("frenzy", "🦈 MEGALODON FRENZY UNLOCKED! 🌊");
+                      closeSettings();
+                    }}
+                    className="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-600 to-blue-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-sky-600/30 cursor-pointer hover:scale-110 active:scale-95 transition-transform"
+                    title="Click for a Megalodon surprise! 🦈"
+                  >
                     🦈
                   </div>
                   <div className="space-y-1">
