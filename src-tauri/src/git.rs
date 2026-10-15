@@ -1333,8 +1333,10 @@ pub fn delete_branch(
     is_remote: bool,
 ) -> Result<(), String> {
     if is_remote {
+        let clean_name = branch_name.trim_start_matches("refs/remotes/");
         let mut branch = repo
-            .find_branch(branch_name, git2::BranchType::Remote)
+            .find_branch(clean_name, git2::BranchType::Remote)
+            .or_else(|_| repo.find_branch(branch_name, git2::BranchType::Remote))
             .map_err(|e| format!("Remote branch '{branch_name}' not found: {e}"))?;
         branch
             .delete()

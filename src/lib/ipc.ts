@@ -489,6 +489,25 @@ export async function executeGitPushIpc(
 }
 
 /**
+ * Execute native git fetch in PTY streaming to active tab xterm with --prune
+ */
+export async function executeGitFetchIpc(
+  repoId: string,
+  remote?: string,
+  prune: boolean = true
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git fetch ${remote || "--all"} (prune=${prune})`);
+    return;
+  }
+  return await invoke<void>("execute_git_fetch", {
+    repoId,
+    remote,
+    prune,
+  });
+}
+
+/**
  * Send SIGINT/kill to active PTY child process (e.g. aborting long-running hook)
  */
 export async function cancelActiveProcessIpc(repoId: string): Promise<void> {

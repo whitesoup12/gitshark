@@ -34,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     deleteBranch,
     executePull,
     executePush,
+    executeFetch,
     fetchRemoteSyncStatus,
     fetchBranches,
   } = useWorkspaceStore();
@@ -51,6 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   const [newBranchName, setNewBranchName] = useState("");
   const [checkoutNewBranch, setCheckoutNewBranch] = useState(true);
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
+  const [isFetchingRemote, setIsFetchingRemote] = useState(false);
 
   const toggleSection = (key: keyof typeof sectionsOpen) => {
     setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -77,9 +79,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     }
   };
 
-  const handleDeleteBranch = async (branchName: string) => {
-    if (window.confirm(`Are you sure you want to delete branch "${branchName}"?`)) {
-      await deleteBranch(tab.id, branchName, false);
+  const handleDeleteBranch = async (branchName: string, isRemote = false) => {
+    const promptMsg = isRemote
+      ? `Are you sure you want to delete remote tracking branch "${branchName}"?`
+      : `Are you sure you want to delete branch "${branchName}"?`;
+    if (window.confirm(promptMsg)) {
+      await deleteBranch(tab.id, branchName, isRemote);
     }
   };
 
@@ -344,13 +349,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
-                    await fetchRemoteSyncStatus(tab.id);
-                    await fetchBranches(tab.id);
+                    if (isFetchingRemote) return;
+                    setIsFetchingRemote(true);
+                    try {
+                      await executeFetch(tab.id, undefined, true);
+                    } finally {
+                      setIsFetchingRemote(false);
+                    }
                   }}
+                  disabled={isFetchingRemote}
                   className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800 transition-colors"
-                  title="Fetch latest remote status"
+                  title="Fetch and prune remote branches (git fetch --prune)"
                 >
-                  <RefreshCw className="w-3 h-3" />
+                  <RefreshCw className={`w-3 h-3 ${isFetchingRemote ? "animate-spin text-sky-400" : ""}`} />
                 </button>
               </div>
             </div>
@@ -372,9 +383,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                         <Globe className="w-3 h-3 text-indigo-400 flex-shrink-0" />
                         <span className="truncate">{branch.shorthand}</span>
                       </div>
-                      <span className="text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 hover:text-indigo-300 transition-opacity">
-                        checkout
-                      </span>
+                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteBranch(branch.shorthand, true);
+                          }}
+                          className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-750 transition-colors"
+                          title={`Delete remote branch '${branch.shorthand}'`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                        <span className="text-[10px] text-slate-500 hover:text-indigo-300">
+                          checkout
+                        </span>
+                      </div>
                     </div>
                   ))
                 )}

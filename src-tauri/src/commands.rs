@@ -588,7 +588,7 @@ pub async fn execute_git_pull(
     };
 
     let git_cmd = resolve_git_command();
-    let mut args = vec!["pull".to_string()];
+    let mut args = vec!["pull".to_string(), "--prune".to_string()];
     if rebase.unwrap_or(false) {
         args.push("--rebase".to_string());
     }
@@ -597,6 +597,44 @@ pub async fn execute_git_pull(
         if let Some(b) = branch {
             args.push(b);
         }
+    }
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn execute_git_fetch(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    remote: Option<String>,
+    prune: Option<bool>,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let mut args = vec!["fetch".to_string()];
+    if prune.unwrap_or(true) {
+        args.push("--prune".to_string());
+    }
+    if let Some(r) = remote {
+        args.push(r);
+    } else {
+        args.push("--all".to_string());
     }
 
     pty_manager.spawn(
