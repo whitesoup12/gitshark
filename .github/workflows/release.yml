@@ -63,7 +63,7 @@ jobs:
           path: |
             dist-release/*.zip
             dist-release/*.exe
-            packaging/scoop/gitshark.json
+            dist-release/gitshark.json
 
   build-macos:
     name: Build & Package macOS (${{ matrix.arch }})
@@ -149,6 +149,7 @@ jobs:
 
       - name: Generate Checksums & Homebrew Cask Manifests
         run: |
+          find dist-release -mindepth 2 -type f -exec mv {} dist-release/ \; 2>/dev/null || true
           node scripts/package-mac.mjs --manifests-only
 
       - name: Publish GitHub Release

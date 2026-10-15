@@ -86,7 +86,6 @@ function renderCaskContent({ version, repoSlug, armHash, intelHash }) {
   end
 
   auto_updates true
-  depends_on macos: ">= :catalina"
 
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
@@ -169,6 +168,37 @@ if (manifestsOnly) {
   const caskContent = renderCaskContent({ version, repoSlug, armHash, intelHash });
   fs.writeFileSync(path.join(casksDir, "gitshark.rb"), caskContent, "utf8");
   fs.writeFileSync(path.join(brewDir, "gitshark.rb"), caskContent, "utf8");
+
+  // Sync Scoop manifest if present in dist-release
+  const distScoop = path.join(distDir, "gitshark.json");
+  if (fs.existsSync(distScoop)) {
+    fs.copyFileSync(distScoop, path.join(rootDir, "packaging", "scoop", "gitshark.json"));
+    fs.copyFileSync(distScoop, path.join(rootDir, "bucket", "gitshark.json"));
+    console.log(`✅ Scoop manifest synchronized from dist-release/gitshark.json`);
+  }
+
+  // If a Windows zip was downloaded into dist-release, ensure scoop manifest hash matches
+  const winZip = fs.readdirSync(distDir).find((f) => f.includes("windows") && f.endsWith(".zip"));
+  if (winZip) {
+    const winZipHash = computeFileSha256(path.join(distDir, winZip));
+    const scoopPath = path.join(rootDir, "packaging", "scoop", "gitshark.json");
+    if (fs.existsSync(scoopPath)) {
+      try {
+        const scoopJson = JSON.parse(fs.readFileSync(scoopPath, "utf8"));
+        if (scoopJson.architecture?.["64bit"]) {
+          scoopJson.architecture["64bit"].hash = winZipHash;
+          scoopJson.architecture["64bit"].url = `https://github.com/${repoSlug}/releases/download/v${version}/${winZip}`;
+          const updatedJson = JSON.stringify(scoopJson, null, 2) + "\n";
+          fs.writeFileSync(scoopPath, updatedJson, "utf8");
+          const bucketPath = path.join(rootDir, "bucket", "gitshark.json");
+          fs.writeFileSync(bucketPath, updatedJson, "utf8");
+          console.log(`✅ Scoop manifest verified & updated for ${winZip}: ${winZipHash}`);
+        }
+      } catch (e) {
+        console.warn(`   ⚠️ Warning updating scoop manifest: ${e.message}`);
+      }
+    }
+  }
 
   // Re-hash all files in dist-release to ensure complete SHA256SUMS.txt
   const newSums = {};

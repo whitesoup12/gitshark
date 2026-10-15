@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "gitshark"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "git2",
  "log",

@@ -158,6 +158,7 @@ const publicManifest = {
 const manifestJson = JSON.stringify(publicManifest, null, 2) + "\n";
 fs.writeFileSync(path.join(scoopDir, "gitshark.json"), manifestJson, "utf8");
 fs.writeFileSync(path.join(bucketDir, "gitshark.json"), manifestJson, "utf8");
+fs.writeFileSync(path.join(distDir, "gitshark.json"), manifestJson, "utf8");
 
 // B. Local manifest pointing to this machine's zip file
 const localZipUri = `file:///${zipPath.replace(/\\/g, "/")}`;

@@ -1,7 +1,7 @@
 cask "gitshark" do
   arch arm: "aarch64", intel: "x64"
 
-  version "1.2.4"
+  version "1.2.5"
   sha256 arm:   "ba76c11818eacea199aad03bd498c123e003bef9b22ef52808049874bfb9b7e5",
          intel: "ba76c11818eacea199aad03bd498c123e003bef9b22ef52808049874bfb9b7e5"
 
@@ -16,7 +16,6 @@ cask "gitshark" do
   end
 
   auto_updates true
-  depends_on macos: ">= :catalina"
 
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
