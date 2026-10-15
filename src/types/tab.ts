@@ -34,6 +34,9 @@ export interface Tab {
 
   // Stashes
   stashes?: import("./repo").StashItem[];
+
+  // Global revision counter incremented on every refresh/action to synchronize all UI sections
+  refreshEpoch?: number;
 }
 
 

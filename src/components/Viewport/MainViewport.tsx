@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Tab, CommitNode } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { formatShortHash } from "@/lib/utils";
-import { getCommitGraphIpc } from "@/lib/ipc";
+import { getCommitGraphIpc, listenToStatusChanged } from "@/lib/ipc";
 import { CommitGraphCanvas } from "@/components/graph/CommitGraphCanvas";
 import { CommitInspector } from "@/components/graph/CommitInspector";
 import { WorkspaceDiffSplit } from "@/components/workspace/WorkspaceDiffSplit";
@@ -25,6 +25,8 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
 
   const [commits, setCommits] = useState<CommitNode[]>([]);
   const [isLoadingGraph, setIsLoadingGraph] = useState(false);
+  const selectedHashRef = React.useRef(tab.selectedCommitHash);
+  selectedHashRef.current = tab.selectedCommitHash;
 
   // Fetch topological commit DAG whenever repoId changes or refresh is requested
   const loadCommitGraph = useCallback(async () => {
@@ -36,7 +38,7 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
       setCommits(graphNodes);
 
       // Auto-select HEAD commit if nothing currently selected
-      if (!tab.selectedCommitHash && graphNodes.length > 0) {
+      if (!selectedHashRef.current && graphNodes.length > 0) {
         updateTab(tab.id, { selectedCommitHash: graphNodes[0].hash });
       }
     } catch (err) {
@@ -44,11 +46,41 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
     } finally {
       setIsLoadingGraph(false);
     }
-  }, [tab.repoId, tab.id, tab.selectedCommitHash, updateTab]);
+  }, [tab.repoId, tab.id, updateTab]);
 
+  // 1. Reload graph on mount, repoId change, refreshEpoch increment, HEAD change, or branch switch
   useEffect(() => {
     loadCommitGraph();
-  }, [tab.repoId]);
+  }, [
+    tab.repoId,
+    tab.refreshEpoch,
+    tab.metadata?.head_commit_hash,
+    tab.metadata?.current_branch,
+    loadCommitGraph,
+  ]);
+
+  // 2. Also reload graph immediately when switching to the "graph" view
+  useEffect(() => {
+    if (tab.activeView === "graph") {
+      loadCommitGraph();
+    }
+  }, [tab.activeView, loadCommitGraph]);
+
+  // 3. Listen to filesystem watcher status changed events to reload graph in real-time
+  useEffect(() => {
+    if (!tab.repoId) return;
+
+    let unlisten: (() => void) | null = null;
+    listenToStatusChanged(tab.repoId, () => {
+      loadCommitGraph();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [tab.repoId, loadCommitGraph]);
 
   const handleSelectCommit = (hash: string) => {
     updateTab(tab.id, { selectedCommitHash: hash });

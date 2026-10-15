@@ -301,15 +301,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     try {
       const metadata = await getRepositoryMetadataIpc(tab.repoId);
+      const nextEpoch = (tab.refreshEpoch ?? 0) + 1;
       get().updateTab(tabId, {
         metadata,
         title: metadata.name,
+        refreshEpoch: nextEpoch,
       });
 
-      // Also refresh remote sync, worktrees, and branches
-      get().fetchRemoteSyncStatus(tabId);
-      get().fetchWorktrees(tabId);
-      get().fetchBranches(tabId);
+      // Concurrently refresh remote sync, worktrees, branches, and stashes
+      await Promise.allSettled([
+        get().fetchRemoteSyncStatus(tabId),
+        get().fetchWorktrees(tabId),
+        get().fetchBranches(tabId),
+        get().fetchStashes(tabId),
+      ]);
     } catch (err) {
       console.error("Failed to refresh repository metadata:", err);
     }
@@ -810,6 +815,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     try {
       await addWorktreeIpc(tab.repoId, path, branch, newBranch);
       await get().fetchWorktrees(tabId);
+      await get().refreshTabMetadata(tabId);
       return true;
     } catch (err) {
       console.error("Failed to add worktree:", err);
@@ -824,6 +830,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     try {
       await removeWorktreeIpc(tab.repoId, path, force);
       await get().fetchWorktrees(tabId);
+      await get().refreshTabMetadata(tabId);
       return true;
     } catch (err) {
       console.error("Failed to remove worktree:", err);
@@ -959,6 +966,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     try {
       await dropStashIpc(tab.repoId, index);
       await get().fetchStashes(tabId);
+      await get().refreshTabMetadata(tabId);
       return true;
     } catch (err) {
       console.error("Failed to drop stash:", err);

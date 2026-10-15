@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Tab, WorkingTreeStatus, FileDiff } from "@/types";
-import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { StagingManager } from "./StagingManager";
 import { DiffViewer } from "@/components/diff/DiffViewer";
 import {
@@ -20,8 +19,6 @@ interface WorkspaceDiffSplitProps {
 }
 
 export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) => {
-  const { refreshTabMetadata } = useWorkspaceStore();
-
   const [status, setStatus] = useState<WorkingTreeStatus>({
     staged: [],
     unstaged: [],
@@ -40,7 +37,6 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     try {
       const currentStatus = await getWorkingTreeStatusIpc(tab.repoId);
       setStatus(currentStatus);
-      refreshTabMetadata(tab.id);
 
       // If no file currently selected, auto-select first available file
       setSelectedFilePath((prev) => {
@@ -62,7 +58,7 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     } finally {
       setIsLoadingStatus(false);
     }
-  }, [tab.repoId, tab.id, refreshTabMetadata]);
+  }, [tab.repoId]);
 
   // 2. Fetch diff for selected file
   const loadDiff = useCallback(async () => {
@@ -112,13 +108,18 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     };
   }, [tab.repoId, loadStatus, loadDiff]);
 
-  // 4. Auto-refresh working tree status and diff when commit/hook completes
+  // 4. Auto-refresh working tree status and diff when commit/hook completes, or on branch switch/pull/stash/refreshEpoch
   useEffect(() => {
-    if (tab.hookState?.status === "passed") {
-      loadStatus();
-      loadDiff();
-    }
-  }, [tab.hookState?.status, loadStatus, loadDiff]);
+    loadStatus();
+    loadDiff();
+  }, [
+    tab.refreshEpoch,
+    tab.hookState?.status,
+    tab.metadata?.current_branch,
+    tab.metadata?.head_commit_hash,
+    loadStatus,
+    loadDiff,
+  ]);
 
   // Staging handlers
   const handleStageFile = async (path: string) => {
