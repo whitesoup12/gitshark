@@ -18,8 +18,10 @@ import {
   Loader2,
   Check,
   Cloud,
+  Settings,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { WorktreeSection } from "./WorktreeSection";
 import { StashSection } from "./StashSection";
 import { TagSection } from "./TagSection";
@@ -42,6 +44,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     fetchRemoteSyncStatus,
     fetchBranches,
   } = useWorkspaceStore();
+
+  const openSettings = useSettingsStore((s) => s.openSettings);
 
   const [sectionsOpen, setSectionsOpen] = useState({
     branches: true,
@@ -522,19 +526,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         </div>
       )}
 
-      {/* Sidebar Footer: Version info */}
+      {/* Sidebar Footer: Version info & Settings */}
       <div className="px-3 py-2 border-t border-shark-800/80 bg-shark-950/60 flex items-center justify-between text-xs select-none flex-shrink-0">
         {!tab.sidebarCollapsed ? (
           <>
-            <span className="text-[11px] font-semibold text-slate-400">GitShark</span>
-            <span className="font-mono text-[10px] text-sky-400/90 bg-sky-950/60 border border-sky-800/40 px-1.5 py-0.2 rounded font-medium">
-              v{APP_VERSION}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-400">GitShark</span>
+              <span className="font-mono text-[10px] text-sky-400/90 bg-sky-950/60 border border-sky-800/40 px-1.5 py-0.2 rounded font-medium">
+                v{APP_VERSION}
+              </span>
+            </div>
+            <button
+              onClick={() => openSettings("git")}
+              className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
+              title="Settings & Git Executable"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
           </>
         ) : (
-          <span className="w-full text-center font-mono text-[9px] text-sky-400" title={`GitShark v${APP_VERSION}`}>
-            v1.0
-          </span>
+          <button
+            onClick={() => openSettings("git")}
+            className="w-full flex items-center justify-center p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
+            title={`GitShark v${APP_VERSION} — Settings`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
         )}
       </div>
     </aside>

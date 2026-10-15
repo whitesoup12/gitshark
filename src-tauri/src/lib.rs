@@ -79,6 +79,9 @@ pub fn run() {
             commands::create_tag,
             commands::delete_tag,
             commands::push_tag,
+            commands::get_git_binary_info,
+            commands::validate_git_path,
+            commands::set_custom_git_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

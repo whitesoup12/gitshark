@@ -6,4 +6,4 @@ export * from "./diff";
 export * from "./hooks";
 export * from "./worktree";
 export * from "./remote";
-
+export * from "./settings";

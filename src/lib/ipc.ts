@@ -14,6 +14,7 @@ import type {
   StashItem,
   CommitDetails,
   GitTagItem,
+  GitBinaryInfo,
 } from "@/types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -970,6 +971,74 @@ export async function pushTagIpc(
   return await invoke<void>("push_tag", { repoId, tagName, remote });
 }
 
+/**
+ * Pick an executable file (e.g. git.exe on Windows, git on Unix)
+ */
+export async function pickGitExecutable(): Promise<string | null> {
+  try {
+    const selected = await openDialog({
+      directory: false,
+      multiple: false,
+      title: "Select Git Executable (git.exe)",
+      filters: [
+        {
+          name: "Git Executable",
+          extensions: ["exe", "cmd", "*"],
+        },
+      ],
+    });
 
+    if (Array.isArray(selected)) {
+      return selected[0] ?? null;
+    }
+    return selected;
+  } catch (err) {
+    console.error("Failed to open file picker for git executable:", err);
+    return null;
+  }
+}
 
+/**
+ * Get current Git binary resolution info (auto-detected vs custom)
+ */
+export async function getGitBinaryInfoIpc(): Promise<GitBinaryInfo> {
+  if (!isTauriEnvironment()) {
+    return {
+      current_path: "C:\\Program Files\\Git\\cmd\\git.exe",
+      is_custom: false,
+      auto_detected_path: "C:\\Program Files\\Git\\cmd\\git.exe",
+      version: "git version 2.48.1.windows.1 (Simulated)",
+      is_valid: true,
+    };
+  }
+  return await invoke<GitBinaryInfo>("get_git_binary_info");
+}
 
+/**
+ * Validate an arbitrary Git executable path
+ */
+export async function validateGitPathIpc(path: string): Promise<string> {
+  if (!isTauriEnvironment()) {
+    if (path.toLowerCase().includes("git")) {
+      return "git version 2.48.1.windows.1 (Simulated)";
+    }
+    throw new Error("Specified path is not a valid Git executable");
+  }
+  return await invoke<string>("validate_git_path", { path });
+}
+
+/**
+ * Set or reset custom Git executable path
+ */
+export async function setCustomGitPathIpc(path: string | null): Promise<GitBinaryInfo> {
+  if (!isTauriEnvironment()) {
+    return {
+      current_path: path || "C:\\Program Files\\Git\\cmd\\git.exe",
+      is_custom: Boolean(path),
+      auto_detected_path: "C:\\Program Files\\Git\\cmd\\git.exe",
+      version: "git version 2.48.1.windows.1 (Simulated)",
+      is_valid: true,
+    };
+  }
+  return await invoke<GitBinaryInfo>("set_custom_git_path", { path });
+}
