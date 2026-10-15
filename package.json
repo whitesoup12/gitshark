@@ -12,8 +12,12 @@
     "build:desktop": "node scripts/run-tauri.mjs build",
     "preview": "vite preview",
     "tauri": "node scripts/run-tauri.mjs",
-    "package:portable": "node scripts/package-release.mjs",
-    "package:scoop": "node scripts/package-release.mjs"
+    "package": "node scripts/package.mjs",
+    "package:mac": "node scripts/package-mac.mjs",
+    "package:brew": "node scripts/package-mac.mjs",
+    "package:win": "node scripts/package-win.mjs",
+    "package:portable": "node scripts/package-win.mjs",
+    "package:scoop": "node scripts/package-win.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",

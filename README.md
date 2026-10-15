@@ -111,7 +111,62 @@ Ensure you have the following installed on your machine:
 
 ### Installation & Distribution
 
-#### Option A: Scoop (Recommended — Zero-Admin, Auto-Updates & Taskbar Pinning)
+#### 🍎 macOS Installation
+
+##### Option 1: Homebrew (Recommended — Auto-Updates & CLI Binary)
+
+If you use [Homebrew](https://brew.sh) on macOS:
+
+**Method 1: Tap the GitShark Repository (Recommended for easy updates)**
+```bash
+# Tap the GitShark repository
+brew tap whitesoup12/gitshark https://github.com/whitesoup12/gitshark
+
+# Install GitShark
+brew install --cask gitshark
+
+# Update to latest release in the future
+brew upgrade --cask gitshark
+```
+
+**Method 2: Direct One-Liner (No tap setup needed)**
+```bash
+# Install directly from the repository cask
+brew install --cask https://raw.githubusercontent.com/whitesoup12/gitshark/main/Casks/gitshark.rb
+
+# Or directly from the GitHub Release asset
+brew install --cask https://github.com/whitesoup12/gitshark/releases/latest/download/gitshark.rb
+```
+
+**Method 3: Local Offline / Development Build**
+```bash
+# Package the local build and generate local cask
+npm run package:mac
+
+# Install via Homebrew
+brew install --cask ./packaging/homebrew/gitshark-local.rb
+```
+
+> **Terminal Integration:** The Homebrew cask automatically puts `GitShark.app` into your `/Applications` folder and creates a `gitshark` CLI command in your `PATH` so you can launch GitShark straight from your terminal!
+>
+> **Gatekeeper Note:** If macOS displays an unverified developer warning when launching for the first time, you can clear the quarantine attribute with:
+> ```bash
+> xattr -cr /Applications/GitShark.app
+> ```
+> Or install using `brew install --cask --no-quarantine gitshark`.
+
+---
+
+##### Option 2: Apple DMG Disk Image (.dmg)
+
+1. Download `GitShark_<version>_aarch64.dmg` (Apple Silicon M1/M2/M3/M4) or `GitShark_<version>_x64.dmg` (Intel) from [GitHub Releases](https://github.com/whitesoup12/gitshark/releases).
+2. Open the `.dmg` file and drag **GitShark** into your **Applications** folder.
+
+---
+
+#### 🪟 Windows Installation
+
+##### Option 1: Scoop (Recommended — Zero-Admin, Auto-Updates & Taskbar Pinning)
 
 If you use [Scoop](https://scoop.sh) on Windows (ideal for restricted enterprise machines without admin rights):
 
@@ -145,15 +200,15 @@ scoop install ./packaging/scoop/gitshark-local.json
 
 ---
 
-#### Option B: Standalone Portable ZIP (Zero-Install)
+##### Option 2: Standalone Portable ZIP (Zero-Install)
 
-1. Download `gitshark-v*-windows-x64-portable.zip` from [GitHub Releases](https://github.com/whitesoup12/gitshark/releases) (or build locally with `npm run package:portable`).
+1. Download `gitshark-v*-windows-x64-portable.zip` from [GitHub Releases](https://github.com/whitesoup12/gitshark/releases) (or build locally with `npm run package:win`).
 2. Extract into `%LOCALAPPDATA%\GitShark\` (or any folder in your user profile).
 3. Right-click `gitshark.exe` and select **Pin to taskbar**.
 
 ---
 
-#### Option C: Build from Source
+#### Option 3: Build from Source
 
 ```bash
 # 1. Clone the repository
@@ -164,8 +219,10 @@ cd gitshark
 npm install
 npm run dev
 
-# 3. Package standalone portable ZIP and Scoop manifests
-npm run package:portable
+# 3. Package for your platform
+npm run package:mac   # macOS: Builds DMG, portable ZIP, & Homebrew Casks
+npm run package:win   # Windows: Builds portable ZIP, standalone EXE, & Scoop manifest
+npm run package       # Auto-detects current OS
 ```
 
 ---
@@ -174,14 +231,20 @@ npm run package:portable
 
 When you create and push a tag matching `v*` (directly from GitShark's **Tag** feature or the CLI):
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
-GitHub Actions automatically builds the optimized Windows binary, calculates SHA-256 checksums, and attaches:
-- `gitshark.exe` (standalone executable)
-- `gitshark-v*-windows-x64-portable.zip` (portable archive)
-- `gitshark.json` (Scoop manifest)
-- `SHA256SUMS.txt` (checksum verification)
+GitHub Actions automatically builds the optimized binaries across Windows and macOS in parallel, calculates SHA-256 checksums, and attaches:
+- **macOS:**
+  - `GitShark_<version>_aarch64.dmg` (Apple Silicon)
+  - `GitShark_<version>_x64.dmg` (Intel)
+  - `gitshark.rb` (Homebrew Cask)
+- **Windows:**
+  - `gitshark.exe` (standalone executable)
+  - `gitshark-v<version>-windows-x64-portable.zip` (portable archive)
+  - `gitshark.json` (Scoop manifest)
+- **Checksums:**
+  - `SHA256SUMS.txt` (checksum verification for all platforms)
 
 ## ⌨️ Productivity Shortcuts
 
