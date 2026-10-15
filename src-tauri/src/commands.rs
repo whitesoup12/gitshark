@@ -1394,6 +1394,30 @@ pub fn get_diff_debounce_delay() -> Result<u64, String> {
     Ok(crate::watcher::get_debounce_window_ms())
 }
 
+#[tauri::command]
+pub async fn get_repository_remote_url(
+    state: State<'_, AppRepoState>,
+    id: String,
+    remote: Option<String>,
+) -> Result<Option<String>, String> {
+    let registry = state.read();
+    let session = registry.get(&id).ok_or_else(|| "Session not found".to_string())?;
+    let repo = session.repo.lock();
+    Ok(git::get_remote_url(&repo, remote.as_deref()))
+}
+
+#[tauri::command]
+pub async fn open_in_browser(app_handle: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Only http and https URLs can be opened in the browser".to_string());
+    }
+    use tauri_plugin_shell::ShellExt;
+    app_handle
+        .shell()
+        .open(&url, None)
+        .map_err(|e| format!("Failed to open browser: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

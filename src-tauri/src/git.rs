@@ -19,6 +19,7 @@ pub struct RepoMetadata {
     pub staged_count: usize,
     pub unstaged_count: usize,
     pub untracked_count: usize,
+    pub remote_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +198,7 @@ pub fn inspect_repository(
     }
 
     let is_dirty = staged_count > 0 || unstaged_count > 0 || untracked_count > 0;
+    let remote_url = get_remote_url(repo, None);
 
     Ok(RepoMetadata {
         id: session_id.to_string(),
@@ -210,7 +212,28 @@ pub fn inspect_repository(
         staged_count,
         unstaged_count,
         untracked_count,
+        remote_url,
     })
+}
+
+/// Query the primary remote URL (defaults to origin, or first discovered remote)
+pub fn get_remote_url(repo: &Repository, remote_name: Option<&str>) -> Option<String> {
+    let target = remote_name.unwrap_or("origin");
+    if let Ok(rem) = repo.find_remote(target) {
+        if let Some(url) = rem.url() {
+            return Some(url.to_string());
+        }
+    }
+    if let Ok(remotes) = repo.remotes() {
+        for name in remotes.iter().flatten() {
+            if let Ok(rem) = repo.find_remote(name) {
+                if let Some(url) = rem.url() {
+                    return Some(url.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Query working tree status into categorized lists: staged, unstaged, untracked

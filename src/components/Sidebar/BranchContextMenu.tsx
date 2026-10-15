@@ -11,6 +11,7 @@ import {
   Check,
   Trash2,
   Globe,
+  GitPullRequest,
 } from "lucide-react";
 
 export interface BranchContextMenuProps {
@@ -25,6 +26,7 @@ export interface BranchContextMenuProps {
   onMerge: (branch: BranchItem) => void;
   onCreateBranchFrom: (branch: BranchItem) => void;
   onDelete: (branch: BranchItem) => void;
+  onOpenPr?: (branch: BranchItem) => void;
 }
 
 export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
@@ -39,6 +41,7 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
   onMerge,
   onCreateBranchFrom,
   onDelete,
+  onOpenPr,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState(position);
@@ -245,6 +248,21 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
           <GitFork className="w-3.5 h-3.5 text-sky-400" />
           <span>New Branch From Here...</span>
         </button>
+
+        {/* Create Pull Request in Browser */}
+        {onOpenPr && (
+          <button
+            onClick={() => {
+              onOpenPr(branch);
+              onClose();
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-emerald-600/20 hover:text-emerald-300 text-slate-200 cursor-pointer transition-colors text-left"
+            title={`Create Pull Request for '${branch.shorthand}' in browser`}
+          >
+            <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Create Pull Request...</span>
+          </button>
+        )}
 
         {/* Copy Branch Name */}
         <button

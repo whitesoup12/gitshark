@@ -45,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     executeMerge,
     fetchRemoteSyncStatus,
     fetchBranches,
+    createPullRequestInBrowser,
   } = useWorkspaceStore();
 
   const openSettings = useSettingsStore((s) => s.openSettings);
@@ -712,6 +713,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
             setSectionsOpen((prev) => ({ ...prev, branches: true }));
           }}
           onDelete={(b) => handleDeleteBranch(b.shorthand, b.is_remote)}
+          onOpenPr={(b) => createPullRequestInBrowser(tab.id, b.shorthand)}
         />
       )}
     </aside>

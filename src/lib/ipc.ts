@@ -1094,3 +1094,27 @@ export async function getDiffDebounceDelayIpc(): Promise<number> {
   return await invoke<number>("get_diff_debounce_delay");
 }
 
+/**
+ * Query the remote URL for a repository
+ */
+export async function getRepositoryRemoteUrlIpc(
+  repoId: string,
+  remote?: string
+): Promise<string | null> {
+  if (!isTauriEnvironment()) {
+    return "https://github.com/whitesoup12/gitshark.git";
+  }
+  return await invoke<string | null>("get_repository_remote_url", { id: repoId, remote });
+}
+
+/**
+ * Open an external URL in the default system web browser
+ */
+export async function openInBrowserIpc(url: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    window.open(url, "_blank");
+    return;
+  }
+  return await invoke<void>("open_in_browser", { url });
+}
+

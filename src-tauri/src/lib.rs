@@ -86,6 +86,8 @@ pub fn run() {
             commands::set_custom_git_path,
             commands::set_diff_debounce_delay,
             commands::get_diff_debounce_delay,
+            commands::get_repository_remote_url,
+            commands::open_in_browser,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

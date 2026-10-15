@@ -12,8 +12,14 @@ interface WorkspaceShellProps {
 }
 
 export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ tab }) => {
-  const { toggleTerminal, toggleSidebar, closeTab, openRepositoryTab } =
-    useWorkspaceStore();
+  const {
+    toggleTerminal,
+    toggleSidebar,
+    closeTab,
+    openRepositoryTab,
+    openRepoInBrowser,
+    createPullRequestInBrowser,
+  } = useWorkspaceStore();
 
   // Keyboard shortcut listener
   useEffect(() => {
@@ -22,19 +28,39 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ tab }) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "`") {
         e.preventDefault();
         toggleTerminal(tab.id);
+        return;
+      }
+
+      // Ignore text entry fields
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+      if (isInput) return;
+
+      // Open repo in browser: Ctrl+Shift+B or Cmd+Shift+B
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        openRepoInBrowser(tab.id);
+      }
+      // Create Pull Request in browser: Ctrl+Shift+P or Cmd+Shift+P
+      else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        createPullRequestInBrowser(tab.id);
       }
       // Toggle sidebar: Ctrl+B or Cmd+B
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b" && !e.shiftKey) {
         e.preventDefault();
         toggleSidebar(tab.id);
       }
       // Close tab: Ctrl+W
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w" && !e.shiftKey) {
         e.preventDefault();
         closeTab(tab.id);
       }
       // Open repo: Ctrl+O
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o" && !e.shiftKey) {
         e.preventDefault();
         openRepositoryTab();
       }
@@ -42,7 +68,15 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ tab }) => {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [tab.id, toggleTerminal, toggleSidebar, closeTab, openRepositoryTab]);
+  }, [
+    tab.id,
+    toggleTerminal,
+    toggleSidebar,
+    closeTab,
+    openRepositoryTab,
+    openRepoInBrowser,
+    createPullRequestInBrowser,
+  ]);
 
   if (tab.isLoading) {
     return (

@@ -13,6 +13,7 @@ export interface RepoMetadata {
   staged_count: number;
   unstaged_count: number;
   untracked_count: number;
+  remote_url?: string | null;
 }
 
 export interface BranchItem {

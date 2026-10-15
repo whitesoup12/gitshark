@@ -39,9 +39,12 @@ import {
   pushTagIpc,
   listenToTerminalExit,
   listenToTerminalData,
+  getRepositoryRemoteUrlIpc,
+  openInBrowserIpc,
 } from "@/lib/ipc";
 import { GitTagItem } from "@/types";
 import { useSharkStore } from "@/store/useSharkStore";
+import { parseGitRemoteUrl } from "@/lib/remoteUrl";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -106,6 +109,10 @@ interface WorkspaceState {
   ) => Promise<boolean>;
   deleteTag: (tabId: string, tagName: string) => Promise<boolean>;
   pushTag: (tabId: string, tagName: string, remote?: string) => Promise<boolean>;
+
+  // Browser Navigation & Pull Requests
+  openRepoInBrowser: (tabId: string) => Promise<boolean>;
+  createPullRequestInBrowser: (tabId: string, branchName?: string) => Promise<boolean>;
 }
 
 // Module-level timers map for elapsed stopwatch per tab
@@ -1414,5 +1421,84 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         resolve(false);
       }
     });
+  },
+
+  openRepoInBrowser: async (tabId: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return false;
+
+    let remoteUrl = tab.metadata?.remote_url;
+    if (!remoteUrl && tab.repoId) {
+      try {
+        remoteUrl = await getRepositoryRemoteUrlIpc(tab.repoId);
+        if (remoteUrl && tab.metadata) {
+          get().updateTab(tabId, {
+            metadata: { ...tab.metadata, remote_url: remoteUrl },
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to query remote URL for repository:", e);
+      }
+    }
+
+    if (!remoteUrl) {
+      console.warn("No remote URL configured for this repository");
+      return false;
+    }
+
+    const parsed = parseGitRemoteUrl(remoteUrl);
+    if (!parsed) {
+      console.warn("Could not parse remote URL:", remoteUrl);
+      return false;
+    }
+
+    try {
+      await openInBrowserIpc(parsed.repoWebUrl);
+      return true;
+    } catch (e) {
+      console.error("Failed to open repository in browser:", e);
+      return false;
+    }
+  },
+
+  createPullRequestInBrowser: async (tabId: string, branchName?: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return false;
+
+    let remoteUrl = tab.metadata?.remote_url;
+    if (!remoteUrl && tab.repoId) {
+      try {
+        remoteUrl = await getRepositoryRemoteUrlIpc(tab.repoId);
+        if (remoteUrl && tab.metadata) {
+          get().updateTab(tabId, {
+            metadata: { ...tab.metadata, remote_url: remoteUrl },
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to query remote URL for repository:", e);
+      }
+    }
+
+    if (!remoteUrl) {
+      console.warn("No remote URL configured for this repository");
+      return false;
+    }
+
+    const parsed = parseGitRemoteUrl(remoteUrl);
+    if (!parsed) {
+      console.warn("Could not parse remote URL:", remoteUrl);
+      return false;
+    }
+
+    const targetBranch = branchName || tab.metadata?.current_branch || undefined;
+    const prUrl = parsed.createPrUrl(targetBranch);
+
+    try {
+      await openInBrowserIpc(prUrl);
+      return true;
+    } catch (e) {
+      console.error("Failed to open PR in browser:", e);
+      return false;
+    }
   },
 }));
