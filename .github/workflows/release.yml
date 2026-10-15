@@ -104,10 +104,14 @@ jobs:
       - name: Install Dependencies
         run: npm ci || npm install
 
+      - name: Install Rosetta 2
+        if: matrix.arch == 'x64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+
       - name: Run Test Suite
         run: |
           npm run build
-          cargo test --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+          cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build & Package macOS Bundles
         run: node scripts/package-mac.mjs --target=${{ matrix.target }} --arch=${{ matrix.arch }}
