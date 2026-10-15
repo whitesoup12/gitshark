@@ -295,17 +295,146 @@ pub async fn get_commit_graph(
     git::parse_commit_graph(&repo_guard, limit.unwrap_or(1000), skip.unwrap_or(0))
 }
 
-fn resolve_git_command() -> String {
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Creates a standard `std::process::Command` configured with `CREATE_NO_WINDOW` (0x08000000)
+/// on Windows. This prevents brief, distracting terminal/command prompt window flashes
+/// when GitShark executes Git or background processes from a GUI application.
+fn create_silent_command<S: AsRef<std::ffi::OsStr>>(program: S) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+static CUSTOM_GIT_PATH: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitBinaryInfo {
+    pub current_path: String,
+    pub is_custom: bool,
+    pub auto_detected_path: String,
+    pub version: Option<String>,
+    pub is_valid: bool,
+}
+
+fn query_git_version(path: &str) -> Option<String> {
+    let output = create_silent_command(path)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stdout.is_empty() {
+            return Some(stdout);
+        }
+    }
+    None
+}
+
+fn detect_system_git_command() -> String {
     #[cfg(target_os = "windows")]
     {
+        // 1. Standard 64-bit and 32-bit Program Files locations
         if std::path::Path::new("C:\\Program Files\\Git\\cmd\\git.exe").exists() {
             return "C:\\Program Files\\Git\\cmd\\git.exe".to_string();
         }
         if std::path::Path::new("C:\\Program Files (x86)\\Git\\cmd\\git.exe").exists() {
             return "C:\\Program Files (x86)\\Git\\cmd\\git.exe".to_string();
         }
+
+        // 2. User-level LocalAppData installation (non-admin portable or installer)
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let user_git = std::path::Path::new(&local_app_data).join("Programs\\Git\\cmd\\git.exe");
+            if user_git.exists() {
+                return user_git.to_string_lossy().to_string();
+            }
+            let user_git_bin = std::path::Path::new(&local_app_data).join("Programs\\Git\\bin\\git.exe");
+            if user_git_bin.exists() {
+                return user_git_bin.to_string_lossy().to_string();
+            }
+        }
+
+        // 3. User Scoop installations
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            let scoop_git = std::path::Path::new(&user_profile).join("scoop\\apps\\git\\current\\bin\\git.exe");
+            if scoop_git.exists() {
+                return scoop_git.to_string_lossy().to_string();
+            }
+            let scoop_shim = std::path::Path::new(&user_profile).join("scoop\\shims\\git.exe");
+            if scoop_shim.exists() {
+                return scoop_shim.to_string_lossy().to_string();
+            }
+        }
     }
     "git".to_string()
+}
+
+fn resolve_git_command() -> String {
+    if let Some(custom) = CUSTOM_GIT_PATH.read().as_ref() {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    detect_system_git_command()
+}
+
+#[tauri::command]
+pub fn get_git_binary_info() -> GitBinaryInfo {
+    let custom_opt = CUSTOM_GIT_PATH.read().clone();
+    let is_custom = custom_opt.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let auto_detected_path = detect_system_git_command();
+    let current_path = if is_custom {
+        custom_opt.unwrap().trim().to_string()
+    } else {
+        auto_detected_path.clone()
+    };
+
+    let version = query_git_version(&current_path);
+    let is_valid = version.is_some();
+
+    GitBinaryInfo {
+        current_path,
+        is_custom,
+        auto_detected_path,
+        version,
+        is_valid,
+    }
+}
+
+#[tauri::command]
+pub fn validate_git_path(path: String) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    match query_git_version(trimmed) {
+        Some(ver) => Ok(ver),
+        None => Err(format!("Could not execute 'git --version' using path: {trimmed}")),
+    }
+}
+
+#[tauri::command]
+pub fn set_custom_git_path(path: Option<String>) -> Result<GitBinaryInfo, String> {
+    match path {
+        Some(p) if !p.trim().is_empty() => {
+            let trimmed = p.trim().to_string();
+            if query_git_version(&trimmed).is_some() {
+                *CUSTOM_GIT_PATH.write() = Some(trimmed);
+            } else {
+                return Err(format!("The specified Git binary cannot be executed or returned an error: {trimmed}"));
+            }
+        }
+        _ => {
+            *CUSTOM_GIT_PATH.write() = None;
+        }
+    }
+    Ok(get_git_binary_info())
 }
 
 #[tauri::command]
@@ -470,7 +599,7 @@ pub async fn list_worktrees(
         (session.path.clone(), resolve_git_command())
     };
 
-    let output = std::process::Command::new(&git_cmd)
+    let output = create_silent_command(&git_cmd)
         .args(["worktree", "list", "--porcelain"])
         .current_dir(&workdir)
         .output()
@@ -508,7 +637,7 @@ pub async fn add_worktree(
         }
     }
 
-    let output = std::process::Command::new(&git_cmd)
+    let output = create_silent_command(&git_cmd)
         .args(&args)
         .current_dir(&workdir)
         .output()
@@ -543,7 +672,7 @@ pub async fn remove_worktree(
     }
     args.push(path);
 
-    let output = std::process::Command::new(&git_cmd)
+    let output = create_silent_command(&git_cmd)
         .args(&args)
         .current_dir(&workdir)
         .output()
@@ -674,7 +803,7 @@ fn kill_clone_process(clone_id: &str) {
         if let Some(pid) = map.remove(clone_id) {
             #[cfg(windows)]
             {
-                let _ = std::process::Command::new("taskkill")
+                let _ = create_silent_command("taskkill")
                     .args(["/PID", &pid.to_string(), "/F", "/T"])
                     .output();
             }
@@ -747,7 +876,7 @@ pub async fn start_clone_repository(
 ) -> Result<(), String> {
     let git_cmd = resolve_git_command();
 
-    let mut cmd = std::process::Command::new(&git_cmd);
+    let mut cmd = create_silent_command(&git_cmd);
     cmd.arg("clone");
     cmd.arg("--progress");
 
@@ -1106,5 +1235,24 @@ pub async fn push_tag(
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn test_git_binary_info_query() {
+        let info = get_git_binary_info();
+        assert!(!info.current_path.is_empty());
+        assert!(!info.auto_detected_path.is_empty());
+    }
 
+    #[test]
+    fn test_validate_git_path() {
+        let info = get_git_binary_info();
+        if info.is_valid {
+            let res = validate_git_path(info.current_path);
+            assert!(res.is_ok());
+            assert!(res.unwrap().contains("git version"));
+        }
+    }
+}

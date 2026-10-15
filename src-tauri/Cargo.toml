@@ -1,6 +1,6 @@
 [package]
 name = "gitshark"
-version = "1.0.0"
+version = "1.1.0"
 description = "GitShark: Fast desktop Git client built with Tauri v2 and Rust"
 authors = ["GitShark Team"]
 edition = "2021"
