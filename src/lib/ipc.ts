@@ -13,6 +13,7 @@ import type {
   RepoBranches,
   StashItem,
   CommitDetails,
+  GitTagItem,
 } from "@/types";
 
 export const isTauriEnvironment = (): boolean => {
@@ -896,6 +897,77 @@ export async function getCommitFileDiffIpc(
     commitSha,
     filePath,
   });
+}
+
+/**
+ * List all tags in the repository
+ */
+export async function listTagsIpc(repoId: string): Promise<GitTagItem[]> {
+  if (!isTauriEnvironment()) {
+    return [
+      {
+        name: "v0.1.0",
+        target_commit: "dca639e37c8ac38fca1f6d7e165b8a0c9eeeda1b",
+        message: "Release v0.1.0",
+        tagger: "GitShark User",
+        tagger_date: Math.floor(Date.now() / 1000),
+      },
+    ];
+  }
+  return await invoke<GitTagItem[]>("list_tags", { repoId });
+}
+
+/**
+ * Create a new tag on a target commit or HEAD
+ */
+export async function createTagIpc(
+  repoId: string,
+  tagName: string,
+  targetCommit?: string,
+  message?: string
+): Promise<GitTagItem> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] create_tag: ${tagName} (commit: ${targetCommit || "HEAD"})`);
+    return {
+      name: tagName,
+      target_commit: targetCommit || "dca639e37c8ac38fca1f6d7e165b8a0c9eeeda1b",
+      message: message || null,
+      tagger: "Browser User",
+      tagger_date: Math.floor(Date.now() / 1000),
+    };
+  }
+  return await invoke<GitTagItem>("create_tag", {
+    repoId,
+    tagName,
+    targetCommit,
+    message,
+  });
+}
+
+/**
+ * Delete a tag from the local repository
+ */
+export async function deleteTagIpc(repoId: string, tagName: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] delete_tag: ${tagName}`);
+    return;
+  }
+  return await invoke<void>("delete_tag", { repoId, tagName });
+}
+
+/**
+ * Push a tag to remote origin via PTY streaming
+ */
+export async function pushTagIpc(
+  repoId: string,
+  tagName: string,
+  remote?: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] push_tag: ${tagName} to ${remote || "origin"}`);
+    return;
+  }
+  return await invoke<void>("push_tag", { repoId, tagName, remote });
 }
 
 

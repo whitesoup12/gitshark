@@ -1591,6 +1591,115 @@ pub fn get_commit_file_diff(
     parse_git2_diff(&diff, clean_path)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitTagItem {
+    pub name: String,
+    pub target_commit: String,
+    pub message: Option<String>,
+    pub tagger: Option<String>,
+    pub tagger_date: Option<i64>,
+}
+
+/// List all tags in the repository
+pub fn list_tags(repo: &Repository) -> Result<Vec<GitTagItem>, String> {
+    let mut tags = Vec::new();
+    let tag_names = repo.tag_names(None).map_err(|e| format!("Failed to list tags: {e}"))?;
+
+    for name in tag_names.iter().flatten() {
+        let full_ref = format!("refs/tags/{name}");
+        if let Ok(reference) = repo.find_reference(&full_ref) {
+            let target_commit = match reference.peel_to_commit() {
+                Ok(c) => c.id().to_string(),
+                Err(_) => reference.target().map(|oid| oid.to_string()).unwrap_or_default(),
+            };
+
+            let mut message = None;
+            let mut tagger = None;
+            let mut tagger_date = None;
+
+            if let Ok(tag_obj) = reference.peel(git2::ObjectType::Tag) {
+                if let Ok(tag) = tag_obj.into_tag() {
+                    message = tag.message().map(|m| m.trim().to_string());
+                    if let Some(t) = tag.tagger() {
+                        tagger = t.name().map(|n| n.to_string());
+                        tagger_date = Some(t.when().seconds());
+                    }
+                }
+            }
+
+            tags.push(GitTagItem {
+                name: name.to_string(),
+                target_commit,
+                message,
+                tagger,
+                tagger_date,
+            });
+        }
+    }
+
+    tags.sort_by(|a, b| b.name.cmp(&a.name));
+    Ok(tags)
+}
+
+/// Create a lightweight or annotated tag on a specified commit or HEAD
+pub fn create_tag(
+    repo: &Repository,
+    tag_name: &str,
+    target_commit: Option<&str>,
+    message: Option<&str>,
+) -> Result<GitTagItem, String> {
+    let clean_name = tag_name.trim();
+    if clean_name.is_empty() {
+        return Err("Tag name cannot be empty".to_string());
+    }
+
+    let target_obj = match target_commit {
+        Some(sha) if !sha.trim().is_empty() => {
+            let oid = git2::Oid::from_str(sha.trim())
+                .map_err(|e| format!("Invalid target commit SHA '{sha}': {e}"))?;
+            repo.find_object(oid, None)
+                .map_err(|e| format!("Commit object not found: {e}"))?
+        }
+        _ => {
+            let head = repo.head().map_err(|e| format!("HEAD not found: {e}"))?;
+            head.peel(git2::ObjectType::Commit)
+                .map_err(|e| format!("Failed to peel HEAD to commit: {e}"))?
+        }
+    };
+
+    let target_oid_str = target_obj.id().to_string();
+
+    match message {
+        Some(msg) if !msg.trim().is_empty() => {
+            let sig = repo
+                .signature()
+                .or_else(|_| git2::Signature::now("GitShark User", "user@gitshark.local"))
+                .map_err(|e| format!("Failed to create signature for tag: {e}"))?;
+            repo.tag(clean_name, &target_obj, &sig, msg.trim(), false)
+                .map_err(|e| format!("Failed to create annotated tag '{clean_name}': {e}"))?;
+        }
+        _ => {
+            repo.tag_lightweight(clean_name, &target_obj, false)
+                .map_err(|e| format!("Failed to create tag '{clean_name}': {e}"))?;
+        }
+    }
+
+    Ok(GitTagItem {
+        name: clean_name.to_string(),
+        target_commit: target_oid_str,
+        message: message.filter(|m| !m.trim().is_empty()).map(|m| m.trim().to_string()),
+        tagger: None,
+        tagger_date: None,
+    })
+}
+
+/// Delete a tag from the local repository
+pub fn delete_tag(repo: &Repository, tag_name: &str) -> Result<(), String> {
+    let clean_name = tag_name.trim().trim_start_matches("refs/tags/");
+    repo.tag_delete(clean_name)
+        .map_err(|e| format!("Failed to delete tag '{clean_name}': {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1677,6 +1786,49 @@ mod tests {
         assert!(!diff_deleted.hunks.is_empty(), "Unstaged deleted file should have hunks");
         assert!(diff_deleted.is_deleted, "Should be marked deleted");
         assert_eq!(diff_deleted.hunks[0].lines[0].origin, '-');
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_create_and_delete_tag() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_tag_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+
+        // 1. Create initial commit so HEAD exists
+        let new_file_path = test_dir.join("release.txt");
+        let mut f = File::create(&new_file_path).unwrap();
+        writeln!(f, "initial release content").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("release.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+
+        let sig = git2::Signature::now("Tester", "tester@test.local").unwrap();
+        let commit_oid = repo.commit(Some("HEAD"), &sig, &sig, "Initial release commit", &tree, &[]).unwrap();
+
+        // 2. Create lightweight tag
+        let tag_item = create_tag(&repo, "v0.1.0", Some(&commit_oid.to_string()), None).unwrap();
+        assert_eq!(tag_item.name, "v0.1.0");
+        assert_eq!(tag_item.target_commit, commit_oid.to_string());
+
+        // 3. Create annotated tag
+        let annotated_tag = create_tag(&repo, "v1.0.0", Some(&commit_oid.to_string()), Some("Production release v1.0.0")).unwrap();
+        assert_eq!(annotated_tag.name, "v1.0.0");
+        assert_eq!(annotated_tag.message.as_deref(), Some("Production release v1.0.0"));
+
+        // 4. List tags
+        let all_tags = list_tags(&repo).unwrap();
+        assert_eq!(all_tags.len(), 2);
+        assert!(all_tags.iter().any(|t| t.name == "v0.1.0"));
+        assert!(all_tags.iter().any(|t| t.name == "v1.0.0"));
+
+        // 5. Delete tag
+        delete_tag(&repo, "v0.1.0").unwrap();
+        let after_delete = list_tags(&repo).unwrap();
+        assert_eq!(after_delete.len(), 1);
+        assert_eq!(after_delete[0].name, "v1.0.0");
 
         let _ = fs::remove_dir_all(&test_dir);
     }

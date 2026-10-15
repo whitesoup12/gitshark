@@ -109,36 +109,79 @@ Ensure you have the following installed on your machine:
    * **macOS**: Xcode Command Line Tools (`xcode-select --install`).
    * **Linux**: `build-essential`, `pkg-config`, `libssl-dev`.
 
-### Installation
+### Installation & Distribution
+
+#### Option A: Scoop (Recommended — Zero-Admin, Auto-Updates & Taskbar Pinning)
+
+If you use [Scoop](https://scoop.sh) on Windows (ideal for restricted enterprise machines without admin rights):
+
+**Method 1: Add as a Scoop Bucket (Recommended for easy updates)**
+```powershell
+# Add the GitShark repository as a bucket
+scoop bucket add gitshark https://github.com/whitesoup12/gitshark.git
+
+# Install GitShark
+scoop install gitshark
+
+# Update to latest release in the future
+scoop update gitshark
+```
+
+**Method 2: Direct One-Liner (No bucket setup needed)**
+```powershell
+# Install directly from the repository manifest
+scoop install https://raw.githubusercontent.com/whitesoup12/gitshark/main/bucket/gitshark.json
+
+# Or directly from the GitHub Release asset
+scoop install https://github.com/whitesoup12/gitshark/releases/latest/download/gitshark.json
+```
+
+**Method 3: Local Offline / Development Build**
+```powershell
+scoop install ./packaging/scoop/gitshark-local.json
+```
+
+> **Taskbar Pinning:** Scoop extracts the app to `%USERPROFILE%\scoop\apps\gitshark` and automatically adds a Start Menu entry under **Scoop Apps**. Open your Windows Start menu, right-click **GitShark**, and select **Pin to taskbar**!
+
+---
+
+#### Option B: Standalone Portable ZIP (Zero-Install)
+
+1. Download `gitshark-v*-windows-x64-portable.zip` from [GitHub Releases](https://github.com/whitesoup12/gitshark/releases) (or build locally with `npm run package:portable`).
+2. Extract into `%LOCALAPPDATA%\GitShark\` (or any folder in your user profile).
+3. Right-click `gitshark.exe` and select **Pin to taskbar**.
+
+---
+
+#### Option C: Build from Source
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/whitesoup12/gitshark.git
 cd gitshark
 
-# 2. Install frontend dependencies
+# 2. Install dependencies & launch desktop in development
 npm install
-```
-
-### Running in Development
-
-Launch the desktop application with live hot-reloading:
-
-```bash
 npm run dev
+
+# 3. Package standalone portable ZIP and Scoop manifests
+npm run package:portable
 ```
-
-### Building for Production
-
-Compile both the frontend bundle and the optimized native release binary:
-
-```bash
-npm run build:desktop
-```
-
-Bundled installers and platform executables will be output directly to `src-tauri/target/release/bundle/`.
 
 ---
+
+### 🚀 Creating Releases via GitHub Actions
+
+When you create and push a tag matching `v*` (directly from GitShark's **Tag** feature or the CLI):
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+GitHub Actions automatically builds the optimized Windows binary, calculates SHA-256 checksums, and attaches:
+- `gitshark.exe` (standalone executable)
+- `gitshark-v*-windows-x64-portable.zip` (portable archive)
+- `gitshark.json` (Scoop manifest)
+- `SHA256SUMS.txt` (checksum verification)
 
 ## ⌨️ Productivity Shortcuts
 

@@ -75,6 +75,10 @@ pub fn run() {
             commands::drop_stash,
             commands::get_commit_details,
             commands::get_commit_file_diff,
+            commands::list_tags,
+            commands::create_tag,
+            commands::delete_tag,
+            commands::push_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Tab } from "@/types";
 import { HookStatusPanel } from "./HookStatusPanel";
 import {
-  executePtyCommandIpc,
   writePtyInputIpc,
   resizePtyIpc,
   killPtyIpc,
@@ -13,7 +12,6 @@ import {
 } from "@/lib/ipc";
 import {
   X,
-  Play,
   RotateCcw,
   Square,
   Terminal as TerminalIcon,
@@ -128,29 +126,6 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
     };
   }, [repoId]);
 
-  const handleRunCommand = useCallback(
-    async (command: string, args: string[]) => {
-      if (!repoId) return;
-
-      const term = terminalInstanceRef.current;
-      if (term) {
-        term.writeln(`\x1b[32m$ ${command} ${args.join(" ")}\x1b[0m`);
-      }
-
-      setIsRunning(true);
-      try {
-        const cols = terminalInstanceRef.current?.cols ?? 80;
-        const rows = terminalInstanceRef.current?.rows ?? 24;
-        await executePtyCommandIpc(repoId, command, args, cols, rows);
-      } catch (err: unknown) {
-        setIsRunning(false);
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        term?.writeln(`\x1b[31mError spawning command: ${errorMsg}\x1b[0m`);
-      }
-    },
-    [repoId]
-  );
-
   const handleClear = () => {
     terminalInstanceRef.current?.clear();
   };
@@ -182,26 +157,8 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
           />
         </div>
 
-        {/* Action presets */}
+        {/* Terminal Controls */}
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => handleRunCommand("git", ["status", "--short"])}
-            disabled={isRunning || !repoId}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono text-slate-300 hover:text-white bg-shark-800 hover:bg-shark-750 disabled:opacity-40 transition-colors"
-          >
-            <Play className="w-2.5 h-2.5" />
-            <span>git status</span>
-          </button>
-
-          <button
-            onClick={() => handleRunCommand("git", ["branch", "-a"])}
-            disabled={isRunning || !repoId}
-            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono text-slate-300 hover:text-white bg-shark-800 hover:bg-shark-750 disabled:opacity-40 transition-colors"
-          >
-            <Play className="w-2.5 h-2.5" />
-            <span>git branch</span>
-          </button>
-
           {isRunning && (
             <button
               onClick={handleStop}

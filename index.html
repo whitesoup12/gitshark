@@ -1,13 +1,47 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" class="dark" style="background-color: #030712; color-scheme: dark;">
   <head>
     <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#030712" />
     <link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GitShark</title>
+    <style>
+      html, body {
+        background-color: #030712 !important;
+        color-scheme: dark !important;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      @keyframes splashPulse {
+        0%, 100% {
+          transform: scale(1);
+          filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.35));
+        }
+        50% {
+          transform: scale(1.05);
+          filter: drop-shadow(0 0 28px rgba(56, 189, 248, 0.65));
+        }
+      }
+      .splash-logo {
+        animation: splashPulse 2.2s ease-in-out infinite;
+      }
+    </style>
   </head>
-  <body class="bg-shark-950 text-slate-100 select-none overflow-hidden antialiased">
-    <div id="root" class="h-screen w-screen flex flex-col"></div>
+  <body class="bg-shark-950 text-slate-100 select-none overflow-hidden antialiased" style="background-color: #030712;">
+    <div id="root" class="h-screen w-screen flex flex-col">
+      <div style="position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #030712; user-select: none;">
+        <img class="splash-logo" src="/app-icon.svg" width="84" height="84" alt="GitShark" />
+        <div style="margin-top: 16px; font-weight: 800; font-size: 18px; letter-spacing: 0.04em; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          GitShark
+        </div>
+        <div style="margin-top: 6px; font-size: 11px; font-weight: 500; color: #38bdf8; font-family: 'JetBrains Mono', Consolas, monospace; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 9999px; padding: 2px 8px;">
+          v1.0.0
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

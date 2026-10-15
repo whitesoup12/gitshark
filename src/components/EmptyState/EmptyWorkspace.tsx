@@ -2,6 +2,7 @@ import React from "react";
 import { FolderGit2, Plus, Terminal, GitFork, Command, Download } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
+import { APP_VERSION } from "@/constants/version";
 
 export const EmptyWorkspace: React.FC = () => {
   const { openRepositoryTab, createEmptyTab, setCloneModalOpen } = useWorkspaceStore();
@@ -18,9 +19,14 @@ export const EmptyWorkspace: React.FC = () => {
             animated={true}
             className="mx-auto shadow-2xl shadow-sky-950/80 transition-transform hover:scale-105 duration-300 cursor-default"
           />
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-sky-400 via-teal-300 to-sky-100 bg-clip-text text-transparent">
-            Welcome to GitShark
-          </h1>
+          <div className="flex items-center justify-center gap-2">
+            <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-sky-400 via-teal-300 to-sky-100 bg-clip-text text-transparent">
+              Welcome to GitShark
+            </h1>
+            <span className="font-mono text-xs px-2 py-0.5 rounded-full bg-sky-950/80 border border-sky-800/60 text-sky-400 font-semibold">
+              v{APP_VERSION}
+            </span>
+          </div>
           <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto">
             High-performance desktop Git client powered by Tauri v2, Rust & git2,
             featuring hardware-accelerated DAG visualization, PTY terminal hook orchestration, and worktree isolation.

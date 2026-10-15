@@ -16,10 +16,14 @@ import {
   Plus,
   Trash2,
   Loader2,
+  Check,
+  Cloud,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { WorktreeSection } from "./WorktreeSection";
 import { StashSection } from "./StashSection";
+import { TagSection } from "./TagSection";
+import { APP_VERSION } from "@/constants/version";
 
 
 interface SidebarProps {
@@ -150,19 +154,69 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         /* Expanded full sidebar content */
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 text-xs">
           {/* Active / Current Branch Callout */}
-          <div className="p-2.5 rounded-md bg-shark-850/80 border border-shark-750/70">
-            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-              Active Branch
+          <div className="p-2.5 rounded-md bg-shark-850/80 border border-shark-750/70 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                Active Branch
+              </span>
+              {/* Working Tree Clean/Dirty Badge */}
+              {metadata?.is_dirty ? (
+                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-medium border border-amber-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span>
+                    Dirty ({(metadata?.staged_count ?? 0) + (metadata?.unstaged_count ?? 0) + (metadata?.untracked_count ?? 0)})
+                  </span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium border border-emerald-500/30">
+                  <Check className="w-2.5 h-2.5 text-emerald-400" />
+                  <span>Clean</span>
+                </span>
+              )}
             </div>
+
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-medium text-sky-300 truncate">
                 <GitBranch className="w-3.5 h-3.5 flex-shrink-0" />
                 <span className="truncate">{currentBranch}</span>
               </div>
-              {metadata?.is_dirty && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-medium border border-amber-500/30">
-                  Dirty
-                </span>
+
+              {/* Upstream Tracking Status */}
+              {tab.remoteSync && (
+                <div className="flex items-center gap-1 text-[10px] flex-shrink-0">
+                  {!tab.remoteSync.has_upstream ? (
+                    <span className="text-slate-500 text-[10px]">No upstream</span>
+                  ) : tab.remoteSync.ahead > 0 || tab.remoteSync.behind > 0 ? (
+                    <div className="flex items-center gap-1 font-mono">
+                      {tab.remoteSync.ahead > 0 && (
+                        <span
+                          className="text-emerald-400 flex items-center gap-0.5"
+                          title={`${tab.remoteSync.ahead} commit(s) ahead of remote`}
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                          {tab.remoteSync.ahead}
+                        </span>
+                      )}
+                      {tab.remoteSync.behind > 0 && (
+                        <span
+                          className="text-amber-400 flex items-center gap-0.5"
+                          title={`${tab.remoteSync.behind} commit(s) behind remote`}
+                        >
+                          <ArrowDown className="w-3 h-3" />
+                          {tab.remoteSync.behind}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span
+                      className="text-sky-400/80 flex items-center gap-1 font-mono text-[10px]"
+                      title="Up to date with remote"
+                    >
+                      <Cloud className="w-3 h-3 text-sky-400" />
+                      <span>synced</span>
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -420,6 +474,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
             onToggle={() => toggleSection("stashes")}
           />
 
+          {/* Section: Tags */}
+          <TagSection
+            tab={tab}
+            isOpen={sectionsOpen.tags}
+            onToggle={() => toggleSection("tags")}
+          />
+
           {/* Section: Client Hooks */}
           {tab.hooksInfo && tab.hooksInfo.active_hooks.length > 0 && (
             <div>
@@ -460,6 +521,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
           )}
         </div>
       )}
+
+      {/* Sidebar Footer: Version info */}
+      <div className="px-3 py-2 border-t border-shark-800/80 bg-shark-950/60 flex items-center justify-between text-xs select-none flex-shrink-0">
+        {!tab.sidebarCollapsed ? (
+          <>
+            <span className="text-[11px] font-semibold text-slate-400">GitShark</span>
+            <span className="font-mono text-[10px] text-sky-400/90 bg-sky-950/60 border border-sky-800/40 px-1.5 py-0.2 rounded font-medium">
+              v{APP_VERSION}
+            </span>
+          </>
+        ) : (
+          <span className="w-full text-center font-mono text-[9px] text-sky-400" title={`GitShark v${APP_VERSION}`}>
+            v1.0
+          </span>
+        )}
+      </div>
     </aside>
   );
 };
