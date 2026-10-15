@@ -24,6 +24,7 @@ import { WorktreeSection } from "./WorktreeSection";
 import { StashSection } from "./StashSection";
 import { TagSection } from "./TagSection";
 import { BranchContextMenu } from "./BranchContextMenu";
+import { DeleteBranchModal } from "./DeleteBranchModal";
 import type { BranchItem } from "@/types";
 import { APP_VERSION } from "@/constants/version";
 import { listenToStatusChanged } from "@/lib/ipc";
@@ -170,12 +171,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     }
   };
 
-  const handleDeleteBranch = async (branchName: string, isRemote = false) => {
-    const promptMsg = isRemote
-      ? `Are you sure you want to delete remote tracking branch "${branchName}"?`
-      : `Are you sure you want to delete branch "${branchName}"?`;
-    if (window.confirm(promptMsg)) {
-      await deleteBranch(tab.id, branchName, isRemote);
+  const [branchToDelete, setBranchToDelete] = useState<{
+    branchName: string;
+    isRemote: boolean;
+  } | null>(null);
+  const [isDeletingBranch, setIsDeletingBranch] = useState(false);
+
+  const promptDeleteBranch = (branchName: string, isRemote = false) => {
+    setBranchToDelete({ branchName, isRemote });
+  };
+
+  const confirmDeleteBranch = async () => {
+    if (!branchToDelete || isDeletingBranch) return;
+    setIsDeletingBranch(true);
+    try {
+      await deleteBranch(tab.id, branchToDelete.branchName, branchToDelete.isRemote);
+      setBranchToDelete(null);
+    } finally {
+      setIsDeletingBranch(false);
     }
   };
 
@@ -477,7 +490,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteBranch(branch.shorthand);
+                                promptDeleteBranch(branch.shorthand);
                               }}
                               className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-shark-800 opacity-0 group-hover:opacity-100 transition-all"
                               title={`Delete branch '${branch.shorthand}'`}
@@ -585,7 +598,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeleteBranch(branch.shorthand, true);
+                            promptDeleteBranch(branch.shorthand, true);
                           }}
                           className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-750 transition-colors"
                           title={`Delete remote branch '${branch.shorthand}'`}
@@ -712,8 +725,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
             setIsAddingBranch(true);
             setSectionsOpen((prev) => ({ ...prev, branches: true }));
           }}
-          onDelete={(b) => handleDeleteBranch(b.shorthand, b.is_remote)}
+          onDelete={(b) => promptDeleteBranch(b.shorthand, b.is_remote)}
           onOpenPr={(b) => createPullRequestInBrowser(tab.id, b.shorthand)}
+        />
+      )}
+
+      {/* Custom Confirmation Modal for Deleting Branches */}
+      {branchToDelete && (
+        <DeleteBranchModal
+          isOpen={true}
+          branchName={branchToDelete.branchName}
+          isRemote={branchToDelete.isRemote}
+          isDeleting={isDeletingBranch}
+          onConfirm={confirmDeleteBranch}
+          onCancel={() => {
+            if (!isDeletingBranch) {
+              setBranchToDelete(null);
+            }
+          }}
         />
       )}
     </aside>
