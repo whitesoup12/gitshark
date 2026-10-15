@@ -45,7 +45,7 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
     if (!tab.repoId || isPulling || isPushing) return;
     setIsPushing(true);
     try {
-      await executePush(tab.id);
+      await executePush(tab.id, undefined, undefined, false, !hasUpstream);
       await fetchRemoteSyncStatus(tab.id);
       await fetchBranches(tab.id);
       await refreshTabMetadata(tab.id);
@@ -76,7 +76,7 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
         onClick={handlePush}
         disabled={isPushing}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded text-xs transition-colors border border-sky-800/60 bg-sky-950/60 hover:bg-sky-900/60 text-sky-200"
-        title="Publish current branch to remote (git push)"
+        title="Publish current branch to remote (git push --set-upstream)"
       >
         <Cloud className={`w-3.5 h-3.5 text-sky-400 ${isPushing ? "animate-pulse" : ""}`} />
         <span className="text-[11px] font-medium">{isPushing ? "Publishing..." : "Publish Branch"}</span>

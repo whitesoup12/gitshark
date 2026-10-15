@@ -209,10 +209,16 @@ pub fn inspect_repository(
 
 /// Query working tree status into categorized lists: staged, unstaged, untracked
 pub fn get_working_tree_status(repo: &Repository) -> Result<WorkingTreeStatus, String> {
+    // Reload index from disk so external operations (like git commit in PTY) are reflected immediately
+    if let Ok(mut idx) = repo.index() {
+        let _ = idx.read(true);
+    }
+
     let mut opts = StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
-        .include_ignored(false);
+        .include_ignored(false)
+        .update_index(true);
 
     let statuses = repo
         .statuses(Some(&mut opts))
@@ -465,7 +471,8 @@ pub fn get_file_diff(repo: &Repository, path: &str, staged: bool) -> Result<File
     let workdir = repo.workdir().ok_or("Bare repository")?;
     let full_path = workdir.join(clean_path);
 
-    let index = repo.index().map_err(|e| format!("Failed to read index: {e}"))?;
+    let mut index = repo.index().map_err(|e| format!("Failed to read index: {e}"))?;
+    let _ = index.read(true);
     let in_index = index.get_path(Path::new(clean_path), 0).is_some();
 
     // 1. Untracked file in working tree (not staged, not in index, exists on disk)

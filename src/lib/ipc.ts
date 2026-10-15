@@ -472,10 +472,11 @@ export async function executeGitPushIpc(
   repoId: string,
   remote?: string,
   branch?: string,
-  force: boolean = false
+  force: boolean = false,
+  setUpstream: boolean = false
 ): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force})`);
+    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force}, setUpstream=${setUpstream})`);
     return;
   }
   return await invoke<void>("execute_git_push", {
@@ -483,6 +484,7 @@ export async function executeGitPushIpc(
     remote,
     branch,
     force,
+    setUpstream,
   });
 }
 

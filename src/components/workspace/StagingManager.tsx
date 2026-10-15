@@ -195,9 +195,12 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
     const fullMessage = desc ? `${summary}\n\n${desc}` : summary;
     const success = await executeCommit(tab.id, fullMessage, isAmend);
-    if (success && !isAmend) {
-      setCommitSummary("");
-      setCommitDescription("");
+    if (success) {
+      if (!isAmend) {
+        setCommitSummary("");
+        setCommitDescription("");
+      }
+      onRefresh();
     }
   };
 

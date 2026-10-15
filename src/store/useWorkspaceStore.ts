@@ -55,7 +55,13 @@ interface WorkspaceState {
   // Hook & Process Orchestration
   fetchRepoHooks: (tabId: string) => Promise<RepoHooksInfo | null>;
   executeCommit: (tabId: string, message: string, amend?: boolean) => Promise<boolean>;
-  executePush: (tabId: string) => Promise<boolean>;
+  executePush: (
+    tabId: string,
+    remote?: string,
+    branch?: string,
+    force?: boolean,
+    setUpstream?: boolean
+  ) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   cancelActiveProcess: (tabId: string) => Promise<void>;
   retryLastHook: (tabId: string) => Promise<void>;
@@ -483,7 +489,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
-  executePush: async (tabId: string): Promise<boolean> => {
+  executePush: async (
+    tabId: string,
+    remote?: string,
+    branch?: string,
+    force: boolean = false,
+    setUpstream: boolean = false
+  ): Promise<boolean> => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
@@ -583,7 +595,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }
         });
 
-        await executeGitPushIpc(repoId);
+        await executeGitPushIpc(repoId, remote, branch, force, setUpstream);
       } catch (err) {
         if (isDone) return;
         isDone = true;

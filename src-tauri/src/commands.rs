@@ -357,13 +357,45 @@ pub async fn execute_git_push(
     remote: Option<String>,
     branch: Option<String>,
     force: Option<bool>,
+    set_upstream: Option<bool>,
 ) -> Result<(), String> {
-    let (pty_manager, workdir) = {
+    let (pty_manager, workdir, auto_upstream, current_branch_name, default_remote) = {
         let registry = state.read();
         let session = registry
             .get(&repo_id)
             .ok_or_else(|| format!("Session not found: {repo_id}"))?;
-        (session.pty_manager.clone(), session.path.clone())
+
+        let repo = session.repo.lock();
+        let mut auto_up = false;
+        let mut cur_branch = None;
+        let mut remote_target = None;
+
+        if let Ok(head) = repo.head() {
+            if head.is_branch() {
+                if let Some(bname) = head.shorthand() {
+                    cur_branch = Some(bname.to_string());
+                    if let Ok(local_b) = repo.find_branch(bname, git2::BranchType::Local) {
+                        if local_b.upstream().is_err() {
+                            auto_up = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(remotes) = repo.remotes() {
+            if let Some(first_remote) = remotes.get(0) {
+                remote_target = Some(first_remote.to_string());
+            }
+        }
+
+        (
+            session.pty_manager.clone(),
+            session.path.clone(),
+            auto_up,
+            cur_branch,
+            remote_target.unwrap_or_else(|| "origin".to_string()),
+        )
     };
 
     let git_cmd = resolve_git_command();
@@ -371,10 +403,20 @@ pub async fn execute_git_push(
     if force.unwrap_or(false) {
         args.push("--force-with-lease".to_string());
     }
-    if let Some(r) = remote {
-        args.push(r);
-        if let Some(b) = branch {
+
+    let should_set_upstream = set_upstream.unwrap_or(auto_upstream);
+    if should_set_upstream {
+        args.push("--set-upstream".to_string());
+        args.push(remote.unwrap_or(default_remote));
+        if let Some(b) = branch.or(current_branch_name) {
             args.push(b);
+        }
+    } else {
+        if let Some(r) = remote {
+            args.push(r);
+            if let Some(b) = branch {
+                args.push(b);
+            }
         }
     }
 

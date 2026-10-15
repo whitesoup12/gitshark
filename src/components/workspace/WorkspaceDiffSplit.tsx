@@ -112,6 +112,14 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     };
   }, [tab.repoId, loadStatus, loadDiff]);
 
+  // 4. Auto-refresh working tree status and diff when commit/hook completes
+  useEffect(() => {
+    if (tab.hookState?.status === "passed") {
+      loadStatus();
+      loadDiff();
+    }
+  }, [tab.hookState?.status, loadStatus, loadDiff]);
+
   // Staging handlers
   const handleStageFile = async (path: string) => {
     if (!tab.repoId) return;
