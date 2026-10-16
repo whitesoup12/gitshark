@@ -99,6 +99,12 @@ function renderCaskContent({ version, repoSlug, armHash, intelHash }) {
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
 
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-cr", "#{appdir}/GitShark.app"],
+                   sudo: false
+  end
+
   zap trash: [
     "~/Library/Application Support/com.gitshark.app",
     "~/Library/Caches/com.gitshark.app",
@@ -128,6 +134,12 @@ function renderLocalCaskContent({ version, repoSlug, dmgPath, sha256 }) {
 
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
+
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-cr", "#{appdir}/GitShark.app"],
+                   sudo: false
+  end
 
   zap trash: [
     "~/Library/Application Support/com.gitshark.app",
@@ -282,17 +294,42 @@ const foundAppPath = appSearchDirs.find(fs.existsSync);
 const targetDmgName = `GitShark_${version}_${resolvedArch}.dmg`;
 const targetDmgPath = path.join(distDir, targetDmgName);
 
-if (foundDmgPath) {
+// Ensure .app bundle has a valid sealed ad-hoc signature (fixes Apple Silicon "Move to Trash" error
+// caused by unsealed linker-signed Mach-O binaries inside .app bundles)
+let appWasResigned = false;
+if (foundAppPath) {
+  try {
+    execSync(`codesign --verify --deep --strict "${foundAppPath}"`, { stdio: "pipe" });
+    console.log(`   ✅ Verified sealed bundle signature on ${foundAppPath}`);
+  } catch {
+    console.log(`   🔏 Applying ad-hoc bundle signature to ${foundAppPath}...`);
+    execSync(`codesign --force --deep --sign - "${foundAppPath}"`, { stdio: "inherit" });
+    appWasResigned = true;
+  }
+}
+
+if (foundDmgPath && !appWasResigned) {
   console.log(`   Found DMG: ${foundDmgPath}`);
   fs.copyFileSync(foundDmgPath, targetDmgPath);
 } else if (foundAppPath) {
-  console.log(`   DMG not found directly, but found ${foundAppPath}. Creating DMG using hdiutil...`);
+  console.log(
+    appWasResigned
+      ? `   Rebuilding DMG from newly signed ${foundAppPath} using hdiutil...`
+      : `   DMG not found directly, but found ${foundAppPath}. Creating DMG using hdiutil...`
+  );
   try {
     if (fs.existsSync(targetDmgPath)) fs.unlinkSync(targetDmgPath);
-    execSync(
-      `hdiutil create -volname "GitShark" -srcfolder "${foundAppPath}" -ov -format UDZO "${targetDmgPath}"`,
-      { stdio: "inherit", cwd: rootDir }
-    );
+    const dmgStageDir = fs.mkdtempSync(path.join(os.tmpdir(), "gitshark-dmg-"));
+    try {
+      execSync(`ditto "${foundAppPath}" "${path.join(dmgStageDir, "GitShark.app")}"`, { stdio: "inherit" });
+      fs.symlinkSync("/Applications", path.join(dmgStageDir, "Applications"));
+      execSync(
+        `hdiutil create -volname "GitShark" -srcfolder "${dmgStageDir}" -ov -format UDZO "${targetDmgPath}"`,
+        { stdio: "inherit", cwd: rootDir }
+      );
+    } finally {
+      fs.rmSync(dmgStageDir, { recursive: true, force: true });
+    }
   } catch (err) {
     console.error(`❌ Failed to create DMG with hdiutil: ${err.message}`);
     process.exit(1);
@@ -304,6 +341,10 @@ if (foundDmgPath) {
   console.error(`   - ${appSearchDirs.join("\n   - ")}`);
   process.exit(1);
 }
+
+try {
+  execSync(`codesign --force --sign - "${targetDmgPath}"`, { stdio: "pipe" });
+} catch {}
 
 // 3. Create standalone .zip archive of the app bundle if present
 const zipName = `GitShark_${version}_${resolvedArch}.zip`;

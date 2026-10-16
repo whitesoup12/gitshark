@@ -20,6 +20,12 @@ cask "gitshark" do
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
 
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-cr", "#{appdir}/GitShark.app"],
+                   sudo: false
+  end
+
   zap trash: [
     "~/Library/Application Support/com.gitshark.app",
     "~/Library/Caches/com.gitshark.app",
