@@ -19,6 +19,10 @@ import {
   executeGitPullIpc,
   executeGitFetchIpc,
   executeGitMergeIpc,
+  executeGitCherryPickIpc,
+  executeGitRevertIpc,
+  checkoutCommitIpc,
+  resetToCommitIpc,
   cancelActiveProcessIpc,
   getRepoHooksIpc,
   listWorktreesIpc,
@@ -76,6 +80,14 @@ interface WorkspaceState {
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
   executeMerge: (tabId: string, branch: string) => Promise<boolean>;
+  executeCherryPick: (tabId: string, commitSha: string) => Promise<boolean>;
+  executeRevert: (tabId: string, commitSha: string) => Promise<boolean>;
+  checkoutCommit: (tabId: string, commitSha: string) => Promise<boolean>;
+  resetToCommit: (
+    tabId: string,
+    commitSha: string,
+    mode: "soft" | "mixed" | "hard"
+  ) => Promise<boolean>;
   cancelActiveProcess: (tabId: string) => Promise<void>;
   retryLastHook: (tabId: string) => Promise<void>;
   dismissHookStatus: (tabId: string) => void;
@@ -473,6 +485,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
+            useSharkStore.getState().recordSharkStat("commit", 1);
             useSharkStore.getState().triggerCelebration("swim", "Commit Chomped! 🦈");
 
             setTimeout(() => {
@@ -606,6 +619,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
+            useSharkStore.getState().recordSharkStat("push", 1);
             useSharkStore.getState().triggerCelebration("swim", "Pushed to Remote Seas! 🌊");
 
             setTimeout(() => {
@@ -1020,6 +1034,303 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  executeCherryPick: async (tabId: string, commitSha: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage: "committing",
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "commit",
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    if (activeTimers.has(tabId)) {
+      clearInterval(activeTimers.get(tabId)!);
+      activeTimers.delete(tabId);
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const currentTab = get().tabs.find((t) => t.id === tabId);
+      if (currentTab?.hookState && currentTab.hookState.status === "running") {
+        get().updateTab(tabId, {
+          hookState: {
+            ...currentTab.hookState,
+            elapsedSeconds: Number(elapsed.toFixed(1)),
+          },
+        });
+      }
+    }, 100);
+    activeTimers.set(tabId, timer);
+
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (activeTimers.has(tabId)) {
+          clearInterval(activeTimers.get(tabId)!);
+          activeTimers.delete(tabId);
+        }
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "committing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "commit",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+            useSharkStore.getState().recordSharkStat("commit", 1);
+            useSharkStore
+              .getState()
+              .triggerCelebration(
+                "swim",
+                `Cherry-picked ${commitSha.slice(0, 7)}! 🍒🦈`
+              );
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "committing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "commit",
+                exitCode: payload.exit_code ?? 1,
+                error: `Cherry-pick failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitCherryPickIpc(repoId, commitSha);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage: "committing",
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "commit",
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
+  },
+
+  executeRevert: async (tabId: string, commitSha: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage: "committing",
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "commit",
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    if (activeTimers.has(tabId)) {
+      clearInterval(activeTimers.get(tabId)!);
+      activeTimers.delete(tabId);
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const currentTab = get().tabs.find((t) => t.id === tabId);
+      if (currentTab?.hookState && currentTab.hookState.status === "running") {
+        get().updateTab(tabId, {
+          hookState: {
+            ...currentTab.hookState,
+            elapsedSeconds: Number(elapsed.toFixed(1)),
+          },
+        });
+      }
+    }, 100);
+    activeTimers.set(tabId, timer);
+
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (activeTimers.has(tabId)) {
+          clearInterval(activeTimers.get(tabId)!);
+          activeTimers.delete(tabId);
+        }
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "committing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "commit",
+                exitCode: 0,
+              },
+            });
+
+            await get().refreshTabMetadata(tabId);
+            useSharkStore.getState().recordSharkStat("chomp", 1);
+            useSharkStore
+              .getState()
+              .triggerCelebration(
+                "chomp",
+                `Reverted commit ${commitSha.slice(0, 7)}! 🦈`
+              );
+
+            setTimeout(() => {
+              const checkTab = get().tabs.find((t) => t.id === tabId);
+              if (checkTab?.hookState?.status === "passed") {
+                get().updateTab(tabId, { terminalOpen: false });
+              }
+            }, 1500);
+
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "committing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "commit",
+                exitCode: payload.exit_code ?? 1,
+                error: `Revert failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeGitRevertIpc(repoId, commitSha);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage: "committing",
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "commit",
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
+  },
+
+  checkoutCommit: async (tabId: string, commitSha: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await checkoutCommitIpc(tab.repoId, commitSha);
+      await get().refreshTabMetadata(tabId);
+      await get().fetchBranches(tabId);
+      return true;
+    } catch (err) {
+      console.error("Failed to checkout commit:", err);
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  },
+
+  resetToCommit: async (
+    tabId: string,
+    commitSha: string,
+    mode: "soft" | "mixed" | "hard"
+  ): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await resetToCommitIpc(tab.repoId, commitSha, mode);
+      await get().refreshTabMetadata(tabId);
+      await get().fetchBranches(tabId);
+      if (mode === "hard") {
+        useSharkStore.getState().recordSharkStat("chomp", 1);
+        useSharkStore
+          .getState()
+          .triggerCelebration(
+            "chomp",
+            `Hard reset to ${commitSha.slice(0, 7)} — chomped clean! 🦈`
+          );
+      }
+      return true;
+    } catch (err) {
+      console.error("Failed to reset to commit:", err);
+      alert(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  },
+
   cancelActiveProcess: async (tabId: string) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return;
@@ -1177,6 +1488,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     try {
       await deleteBranchIpc(tab.repoId, branchName, isRemote);
+      useSharkStore.getState().recordSharkStat("chomp", 1);
+      useSharkStore
+        .getState()
+        .triggerCelebration("chomp", `Chomped branch '${branchName}'! 🦈`);
       await get().refreshTabMetadata(tabId);
       await get().fetchBranches(tabId);
       return true;
@@ -1207,6 +1522,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     try {
       await createStashIpc(tab.repoId, message, includeUntracked);
+      useSharkStore.getState().recordSharkStat("stash", 1);
       await get().refreshTabMetadata(tabId);
       await get().fetchStashes(tabId);
       return true;
@@ -1239,6 +1555,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     try {
       await dropStashIpc(tab.repoId, index);
+      useSharkStore.getState().recordSharkStat("chomp", 1);
+      useSharkStore
+        .getState()
+        .triggerCelebration("chomp", `Chomped stash@{${index}}! 🦈`);
       await get().fetchStashes(tabId);
       await get().refreshTabMetadata(tabId);
       return true;

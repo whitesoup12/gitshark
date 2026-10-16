@@ -452,19 +452,30 @@ export const SettingsModal: React.FC = () => {
                     </label>
                   </div>
 
-                  {/* Test Shark Swim Button */}
-                  <div className="pt-3 border-t border-shark-850 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-400">Preview the swimming shark animation:</span>
-                    <button
-                      onClick={() => {
-                        triggerCelebration("swim", "Swimming through your changes! 🦈");
-                        closeSettings();
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 text-sky-300 text-xs font-medium transition-colors"
-                    >
-                      <Waves className="w-3.5 h-3.5" />
-                      <span>Test Shark Swim 🦈</span>
-                    </button>
+                  {/* Test Shark Swim & Chomp Buttons */}
+                  <div className="pt-3 border-t border-shark-850 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-400">Preview shark animations:</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          triggerCelebration("chomp", "CHOMP! Snapping through stale code! 🦈");
+                          closeSettings();
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-medium transition-colors"
+                      >
+                        <span>Test Shark Chomp 🦷</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          triggerCelebration("swim", "Swimming through your changes! 🦈");
+                          closeSettings();
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 text-sky-300 text-xs font-medium transition-colors"
+                      >
+                        <Waves className="w-3.5 h-3.5" />
+                        <span>Test Shark Swim 🦈</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

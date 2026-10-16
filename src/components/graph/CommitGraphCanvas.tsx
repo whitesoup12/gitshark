@@ -14,6 +14,9 @@ interface CommitGraphCanvasProps {
   commits: CommitNode[];
   selectedCommitHash: string | null;
   onSelectCommit: (hash: string) => void;
+  onContextMenuCommit?: (commit: CommitNode, x: number, y: number) => void;
+  matchedCommitHashes?: Set<string>;
+  scrollToRowIndex?: number | null;
   isLoading?: boolean;
 }
 
@@ -21,6 +24,9 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
   commits,
   selectedCommitHash,
   onSelectCommit,
+  onContextMenuCommit,
+  matchedCommitHashes,
+  scrollToRowIndex = null,
   isLoading = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,6 +44,20 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
   }, [commits]);
 
   const graphLaneAreaWidth = GRAPH_PADDING_X + (maxLane + 1) * LANE_WIDTH + 14;
+
+  // Scroll to target row when search navigation triggers scrollToRowIndex
+  useEffect(() => {
+    if (scrollToRowIndex === null || scrollToRowIndex < 0) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const targetY = scrollToRowIndex * ROW_HEIGHT;
+    const centeredScrollTop = Math.max(
+      0,
+      targetY - viewportHeight / 2 + ROW_HEIGHT / 2
+    );
+    container.scrollTo({ top: centeredScrollTop, behavior: "smooth" });
+  }, [scrollToRowIndex, viewportHeight]);
 
   // Track container dimensions via ResizeObserver
   useEffect(() => {
@@ -102,12 +122,13 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
       Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
     );
 
-    // 1. Draw row background stripes & selection/hover highlights
+    // 1. Draw row background stripes & selection/hover/search-match highlights
     for (let r = startIndex; r <= endIndex; r++) {
       const commit = commits[r];
       const y = r * ROW_HEIGHT - scrollTop;
       const isSelected = commit.hash === selectedCommitHash;
       const isHovered = r === hoveredRow;
+      const isSearchMatch = Boolean(matchedCommitHashes?.has(commit.hash));
 
       if (isSelected) {
         ctx.fillStyle = "rgba(14, 165, 233, 0.16)";
@@ -116,6 +137,13 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
         // Left accent indicator on selected row
         ctx.fillStyle = "#0ea5e9";
         ctx.fillRect(0, y, 3, ROW_HEIGHT);
+      } else if (isSearchMatch) {
+        ctx.fillStyle = "rgba(245, 158, 11, 0.11)";
+        ctx.fillRect(0, y, viewportWidth, ROW_HEIGHT);
+
+        // Left amber accent indicator on search match row
+        ctx.fillStyle = "#f59e0b";
+        ctx.fillRect(0, y, 2.5, ROW_HEIGHT);
       } else if (isHovered) {
         ctx.fillStyle = "rgba(30, 41, 59, 0.45)";
         ctx.fillRect(0, y, viewportWidth, ROW_HEIGHT);
@@ -212,6 +240,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
       const nodeColor = LANE_COLORS[commit.color_index % LANE_COLORS.length];
 
       // Outer Selection Ring / Halo
+      const isSearchMatched = matchedCommitHashes?.has(commit.hash) ?? false;
       if (isSelected) {
         ctx.save();
         ctx.beginPath();
@@ -220,6 +249,16 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
         ctx.lineWidth = 2;
         ctx.shadowColor = "#38bdf8";
         ctx.shadowBlur = 8;
+        ctx.stroke();
+        ctx.restore();
+      } else if (isSearchMatched) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, NODE_RADIUS + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = "#fbbf24";
+        ctx.lineWidth = 1.8;
+        ctx.shadowColor = "#fbbf24";
+        ctx.shadowBlur = 5;
         ctx.stroke();
         ctx.restore();
       } else if (isHovered) {
@@ -254,6 +293,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
       const y = r * ROW_HEIGHT - scrollTop;
       const baselineY = y + ROW_HEIGHT / 2 + 4;
       const isSelected = commit.hash === selectedCommitHash;
+      const isSearchMatched = matchedCommitHashes?.has(commit.hash) ?? false;
 
       let currentX = graphLaneAreaWidth;
 
@@ -291,10 +331,10 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
 
       // Draw Commit Summary Message
       ctx.save();
-      ctx.font = isSelected
+      ctx.font = isSelected || isSearchMatched
         ? "600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
         : "400 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-      ctx.fillStyle = isSelected ? "#38bdf8" : "#f1f5f9";
+      ctx.fillStyle = isSelected ? "#38bdf8" : isSearchMatched ? "#fde68a" : "#f1f5f9";
 
       const maxSummaryWidth = Math.max(100, viewportWidth - currentX - 220);
       const summaryText = truncateText(ctx, commit.summary || "(no message)", maxSummaryWidth);
@@ -307,7 +347,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
 
       // Short Commit Hash
       ctx.font = "500 10.5px 'JetBrains Mono', monospace";
-      ctx.fillStyle = "#64748b";
+      ctx.fillStyle = isSearchMatched ? "#fbbf24" : "#64748b";
       const shortHash = commit.hash.slice(0, 7);
       ctx.fillText(shortHash, rightX - 50, baselineY);
 
@@ -328,6 +368,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
     viewportWidth,
     hoveredRow,
     selectedCommitHash,
+    matchedCommitHashes,
     graphLaneAreaWidth,
   ]);
 
@@ -342,6 +383,24 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
 
     if (rowIndex >= 0 && rowIndex < commits.length) {
       onSelectCommit(commits[rowIndex].hash);
+    }
+  };
+
+  // Right-Click Hit-Detection: selects commit & opens context menu
+  const handleCanvasContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const clickY = e.clientY - rect.top + container.scrollTop;
+    const rowIndex = Math.floor(clickY / ROW_HEIGHT);
+
+    if (rowIndex >= 0 && rowIndex < commits.length) {
+      const targetCommit = commits[rowIndex];
+      onSelectCommit(targetCommit.hash);
+      onContextMenuCommit?.(targetCommit, e.clientX, e.clientY);
     }
   };
 
@@ -400,6 +459,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
         ref={containerRef}
         onScroll={handleScroll}
         onClick={handleCanvasClick}
+        onContextMenu={handleCanvasContextMenu}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         className="absolute inset-0 overflow-y-auto overflow-x-hidden"

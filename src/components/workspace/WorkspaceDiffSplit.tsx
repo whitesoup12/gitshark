@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { Tab, WorkingTreeStatus, FileDiff } from "@/types";
 import { StagingManager } from "./StagingManager";
 import { DiffViewer } from "@/components/diff/DiffViewer";
+import { useSharkStore } from "@/store/useSharkStore";
 import {
   getWorkingTreeStatusIpc,
   stageFileIpc,
@@ -215,6 +216,11 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
   const handleDiscardFile = async (path: string) => {
     if (!tab.repoId) return;
     await discardFileChangesIpc(tab.repoId, path);
+    const fileName = path.split(/[/\\]/).pop() || path;
+    useSharkStore.getState().recordSharkStat("chomp", 1);
+    useSharkStore
+      .getState()
+      .triggerCelebration("chomp", `Chomped changes in ${fileName}! 🦈`);
     await loadStatus();
     if (selectedFilePath === path) {
       setDiff(null);
@@ -224,7 +230,18 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
 
   const handleDiscardAll = async () => {
     if (!tab.repoId) return;
+    const chompCount = Math.max(
+      1,
+      status.unstaged.length + status.untracked.length
+    );
     await discardAllUnstagedChangesIpc(tab.repoId);
+    useSharkStore.getState().recordSharkStat("chomp", chompCount);
+    useSharkStore
+      .getState()
+      .triggerCelebration(
+        "chomp",
+        `Chomped ${chompCount} unstaged file${chompCount === 1 ? "" : "s"} into the abyss! 🦈`
+      );
     await loadStatus();
     if (!selectedFileStaged) {
       setDiff(null);
