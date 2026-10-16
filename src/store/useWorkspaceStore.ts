@@ -45,6 +45,7 @@ import {
   listenToTerminalData,
   getRepositoryRemoteUrlIpc,
   openInBrowserIpc,
+  getCommitGraphIpc,
 } from "@/lib/ipc";
 import { GitTagItem } from "@/types";
 import { useSharkStore } from "@/store/useSharkStore";
@@ -486,7 +487,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
             await get().refreshTabMetadata(tabId);
             useSharkStore.getState().recordSharkStat("commit", 1);
-            useSharkStore.getState().triggerCelebration("swim", "Commit Chomped! 🦈");
+            useSharkStore.getState().triggerCelebration("swim", "Commit Chomped! (+5 XP) 🦈");
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -620,7 +621,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
             await get().refreshTabMetadata(tabId);
             useSharkStore.getState().recordSharkStat("push", 1);
-            useSharkStore.getState().triggerCelebration("swim", "Pushed to Remote Seas! 🌊");
+            useSharkStore.getState().triggerCelebration("swim", "Pushed to Remote Seas! (+10 XP) 🌊");
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -678,6 +679,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab || !tab.repoId) return false;
 
     const repoId = tab.repoId;
+    const targetBranch = (branch || tab.metadata?.current_branch || "").toLowerCase();
+    const prevMainBranchObj = tab.branches?.local.find(
+      (b) => b.shorthand.toLowerCase() === targetBranch
+    );
+    const prevTargetCommit =
+      prevMainBranchObj?.target_commit ||
+      (tab.metadata?.current_branch?.toLowerCase() === targetBranch
+        ? tab.metadata?.head_commit_hash
+        : undefined);
+
     get().updateTab(tabId, {
       terminalOpen: true,
       hookState: {
@@ -745,6 +756,68 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
+
+            // Detect if pulling main/master brought in newly merged branches or PRs (+20 XP each)
+            const isMainOrMaster = targetBranch === "main" || targetBranch === "master";
+            if (isMainOrMaster && prevTargetCommit) {
+              const updatedTab = get().tabs.find((t) => t.id === tabId);
+              const newMainBranchObj = updatedTab?.branches?.local.find(
+                (b) => b.shorthand.toLowerCase() === targetBranch
+              );
+              const newTargetCommit =
+                newMainBranchObj?.target_commit ||
+                (updatedTab?.metadata?.current_branch?.toLowerCase() === targetBranch
+                  ? updatedTab?.metadata?.head_commit_hash
+                  : undefined);
+
+              if (newTargetCommit && newTargetCommit !== prevTargetCommit) {
+                let mergesCount = 1;
+                try {
+                  const recentGraph = await getCommitGraphIpc(repoId, 25, 0);
+                  const byHash = new Map(recentGraph.map((c) => [c.hash, c]));
+
+                  // Walk ONLY the first-parent spine of main from newTargetCommit -> prevTargetCommit
+                  // (up to 5 steps max so pulling an old/stale repo never dumps historical XP)
+                  const firstParentNewCommits = [];
+                  let cursor = byHash.get(newTargetCommit);
+                  let steps = 0;
+                  let reachedPrev = false;
+
+                  while (cursor && steps < 5) {
+                    if (cursor.hash === prevTargetCommit) {
+                      reachedPrev = true;
+                      break;
+                    }
+                    firstParentNewCommits.push(cursor);
+                    const firstParentHash = cursor.parents[0];
+                    cursor = firstParentHash ? byHash.get(firstParentHash) : undefined;
+                    steps++;
+                  }
+
+                  if (reachedPrev && firstParentNewCommits.length > 0) {
+                    const explicitMerges = firstParentNewCommits.filter(
+                      (c) =>
+                        c.parents.length > 1 ||
+                        /^merge\s+(pull request|branch|remote-tracking)/i.test(c.summary) ||
+                        /\(#\d+\)\s*$/.test(c.summary)
+                    ).length;
+                    if (explicitMerges > 0) {
+                      mergesCount = explicitMerges;
+                    }
+                  }
+                } catch {
+                  // Fallback to 1 merge if commit graph inspection fails
+                }
+
+                useSharkStore.getState().recordSharkStat("main_merge", mergesCount);
+                useSharkStore
+                  .getState()
+                  .triggerCelebration(
+                    "swim",
+                    `Branch landed on ${targetBranch}! (+${mergesCount * 20} XP) 🌊`
+                  );
+              }
+            }
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -920,6 +993,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab || !tab.repoId) return false;
 
     const repoId = tab.repoId;
+    const currentBranch = (tab.metadata?.current_branch || "").toLowerCase();
+
     get().updateTab(tabId, {
       terminalOpen: true,
       hookState: {
@@ -987,6 +1062,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
+
+            // Award +20 XP when a branch is merged into main or master
+            const isMergingIntoMain =
+              (currentBranch === "main" || currentBranch === "master") &&
+              branch.toLowerCase() !== currentBranch &&
+              !branch.toLowerCase().endsWith(`/${currentBranch}`);
+
+            if (isMergingIntoMain) {
+              useSharkStore.getState().recordSharkStat("main_merge", 1);
+              useSharkStore
+                .getState()
+                .triggerCelebration(
+                  "swim",
+                  `Branch '${branch}' merged into ${currentBranch}! (+20 XP) 🦈`
+                );
+            }
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);

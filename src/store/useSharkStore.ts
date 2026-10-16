@@ -12,8 +12,13 @@ export interface SharkStats {
   changesChomped: number;
   pushesLaunched: number;
   stashesBuried: number;
+  mergesToMain: number;
   storagePath: string;
 }
+
+export const XP_PER_COMMIT = 5;
+export const XP_PER_PUSH = 10;
+export const XP_PER_MAIN_MERGE = 20;
 
 export interface SharkRankInfo {
   level: number;
@@ -41,7 +46,7 @@ export const SHARK_RANKS: {
     title: "Reef Pup",
     emoji: "🐟",
     minScore: 0,
-    nextScore: 5,
+    nextScore: 1000,
     glowColor: "#38bdf8",
     badgeClass: "bg-sky-950/70 text-sky-300 border-sky-700/50",
   },
@@ -49,8 +54,8 @@ export const SHARK_RANKS: {
     level: 2,
     title: "Mako Sprinter",
     emoji: "⚡",
-    minScore: 5,
-    nextScore: 15,
+    minScore: 1000,
+    nextScore: 3000,
     glowColor: "#34d399",
     badgeClass: "bg-emerald-950/70 text-emerald-300 border-emerald-700/50",
   },
@@ -58,8 +63,8 @@ export const SHARK_RANKS: {
     level: 3,
     title: "Hammerhead Navigator",
     emoji: "🔨",
-    minScore: 15,
-    nextScore: 30,
+    minScore: 3000,
+    nextScore: 9000,
     glowColor: "#fbbf24",
     badgeClass: "bg-amber-950/70 text-amber-300 border-amber-700/50",
   },
@@ -67,8 +72,8 @@ export const SHARK_RANKS: {
     level: 4,
     title: "Great White Apex",
     emoji: "🦈",
-    minScore: 30,
-    nextScore: 60,
+    minScore: 9000,
+    nextScore: 27000,
     glowColor: "#818cf8",
     badgeClass: "bg-indigo-950/70 text-indigo-300 border-indigo-700/50",
   },
@@ -76,7 +81,7 @@ export const SHARK_RANKS: {
     level: 5,
     title: "Cyber Megalodon",
     emoji: "🌊",
-    minScore: 60,
+    minScore: 27000,
     nextScore: null,
     glowColor: "#c084fc",
     badgeClass: "bg-purple-950/80 text-purple-300 border-purple-600/60",
@@ -85,10 +90,9 @@ export const SHARK_RANKS: {
 
 export function computeSharkRank(stats: SharkStats): SharkRankInfo {
   const totalScore =
-    stats.commitsSwum +
-    stats.changesChomped +
-    stats.pushesLaunched +
-    stats.stashesBuried;
+    stats.commitsSwum * XP_PER_COMMIT +
+    stats.pushesLaunched * XP_PER_PUSH +
+    (stats.mergesToMain || 0) * XP_PER_MAIN_MERGE;
 
   let current = SHARK_RANKS[0];
   for (const tier of SHARK_RANKS) {
@@ -146,6 +150,7 @@ function loadLocalStats(): SharkStats {
         changesChomped: Number(parsed.changesChomped) || 0,
         pushesLaunched: Number(parsed.pushesLaunched) || 0,
         stashesBuried: Number(parsed.stashesBuried) || 0,
+        mergesToMain: Number(parsed.mergesToMain) || 0,
         storagePath: parsed.storagePath || "~/.gitshark/shark_stats.json",
       };
     }
@@ -157,6 +162,7 @@ function loadLocalStats(): SharkStats {
     changesChomped: 0,
     pushesLaunched: 0,
     stashesBuried: 0,
+    mergesToMain: 0,
     storagePath: "~/.gitshark/shark_stats.json",
   };
 }
@@ -179,7 +185,7 @@ interface SharkStoreState {
 
   initSharkStats: () => Promise<void>;
   recordSharkStat: (
-    kind: "commit" | "chomp" | "push" | "stash",
+    kind: "commit" | "chomp" | "push" | "stash" | "main_merge",
     amount?: number
   ) => void;
   setCelebrationsEnabled: (enabled: boolean) => void;
@@ -232,6 +238,10 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
             local.stashesBuried,
             diskStats.stashes_buried || 0
           ),
+          mergesToMain: Math.max(
+            local.mergesToMain || 0,
+            diskStats.merges_to_main || 0
+          ),
           storagePath:
             diskStats.storage_path ||
             local.storagePath ||
@@ -247,6 +257,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
           changes_chomped: merged.changesChomped,
           pushes_launched: merged.pushesLaunched,
           stashes_buried: merged.stashesBuried,
+          merges_to_main: merged.mergesToMain,
           storage_path: merged.storagePath,
         });
       } catch (err) {
@@ -255,7 +266,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
     },
 
     recordSharkStat: (
-      kind: "commit" | "chomp" | "push" | "stash",
+      kind: "commit" | "chomp" | "push" | "stash" | "main_merge",
       amount = 1
     ) => {
       const prevStats = get().stats;
@@ -277,6 +288,10 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
           kind === "stash"
             ? prevStats.stashesBuried + amount
             : prevStats.stashesBuried,
+        mergesToMain:
+          kind === "main_merge"
+            ? (prevStats.mergesToMain || 0) + amount
+            : prevStats.mergesToMain || 0,
       };
 
       saveLocalStats(nextStats);
@@ -297,6 +312,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
         changes_chomped: nextStats.changesChomped,
         pushes_launched: nextStats.pushesLaunched,
         stashes_buried: nextStats.stashesBuried,
+        merges_to_main: nextStats.mergesToMain,
         storage_path: nextStats.storagePath,
       }).catch((err) => {
         console.warn("Failed to write shark stats to disk:", err);

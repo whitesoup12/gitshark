@@ -1516,6 +1516,8 @@ pub struct SharkStatsData {
     pub pushes_launched: u64,
     pub stashes_buried: u64,
     #[serde(default)]
+    pub merges_to_main: u64,
+    #[serde(default)]
     pub storage_path: String,
 }
 
@@ -1546,6 +1548,7 @@ pub fn get_shark_stats() -> Result<SharkStatsData, String> {
         changes_chomped: 0,
         pushes_launched: 0,
         stashes_buried: 0,
+        merges_to_main: 0,
         storage_path: path_str,
     })
 }

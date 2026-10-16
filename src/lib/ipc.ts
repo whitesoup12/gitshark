@@ -1180,6 +1180,7 @@ export interface SharkStatsData {
   changes_chomped: number;
   pushes_launched: number;
   stashes_buried: number;
+  merges_to_main?: number;
   storage_path?: string;
 }
 
@@ -1193,6 +1194,7 @@ export async function getSharkStatsIpc(): Promise<SharkStatsData> {
       changes_chomped: 0,
       pushes_launched: 0,
       stashes_buried: 0,
+      merges_to_main: 0,
       storage_path: "~/.gitshark/shark_stats.json",
     };
   }

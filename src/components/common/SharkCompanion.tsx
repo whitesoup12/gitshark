@@ -473,7 +473,7 @@ export const SharkWisdomModal: React.FC = () => {
                   <span
                     className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${rank.badgeClass}`}
                   >
-                    {rank.totalScore} XP
+                    {rank.totalScore.toLocaleString()} XP
                   </span>
                 </div>
               </div>
@@ -483,7 +483,7 @@ export const SharkWisdomModal: React.FC = () => {
               <div className="text-right">
                 <div className="text-[10px] text-slate-500">Next Evolution</div>
                 <div className="text-[11px] font-mono text-sky-400 font-semibold">
-                  {rank.nextScore - rank.totalScore} bites to{" "}
+                  {(rank.nextScore - rank.totalScore).toLocaleString()} XP to{" "}
                   {SHARK_RANKS[rank.level]?.title}
                 </div>
               </div>
@@ -502,31 +502,47 @@ export const SharkWisdomModal: React.FC = () => {
             />
           </div>
 
-          {/* 4 Feeding Stat Counters */}
+          {/* 4 Feeding & XP Stat Counters */}
           <div className="grid grid-cols-4 gap-1.5 pt-0.5 text-center">
-            <div className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80">
+            <div
+              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
+              title="Commits created (+5 XP each)"
+            >
               <div className="text-xs font-bold font-mono text-sky-300">
                 {stats.commitsSwum}
               </div>
               <div className="text-[9px] text-slate-400 truncate">Commits</div>
+              <div className="text-[8px] font-mono text-sky-400/80">+5 XP</div>
             </div>
-            <div className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80">
-              <div className="text-xs font-bold font-mono text-rose-300">
-                {stats.changesChomped}
-              </div>
-              <div className="text-[9px] text-slate-400 truncate">Chomped</div>
-            </div>
-            <div className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80">
+            <div
+              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
+              title="Pushes to remote (+10 XP each)"
+            >
               <div className="text-xs font-bold font-mono text-emerald-300">
                 {stats.pushesLaunched}
               </div>
               <div className="text-[9px] text-slate-400 truncate">Pushes</div>
+              <div className="text-[8px] font-mono text-emerald-400/80">+10 XP</div>
             </div>
-            <div className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80">
-              <div className="text-xs font-bold font-mono text-amber-300">
-                {stats.stashesBuried}
+            <div
+              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
+              title="Branches merged into main/master (+20 XP each)"
+            >
+              <div className="text-xs font-bold font-mono text-purple-300">
+                {stats.mergesToMain || 0}
               </div>
-              <div className="text-[9px] text-slate-400 truncate">Stashes</div>
+              <div className="text-[9px] text-slate-400 truncate">To Main</div>
+              <div className="text-[8px] font-mono text-purple-400/80">+20 XP</div>
+            </div>
+            <div
+              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
+              title="Discarded files, deleted branches & dropped stashes chomped"
+            >
+              <div className="text-xs font-bold font-mono text-rose-300">
+                {stats.changesChomped}
+              </div>
+              <div className="text-[9px] text-slate-400 truncate">Chomped</div>
+              <div className="text-[8px] font-mono text-rose-400/80">🦈 Jaws</div>
             </div>
           </div>
 
