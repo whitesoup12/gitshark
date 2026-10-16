@@ -1,11 +1,11 @@
 {
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "GitShark (Local Portable Build for Scoop)",
   "homepage": "https://github.com/whitesoup12/gitshark",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "file:///D:/Development/gitshark/dist-release/gitshark-v1.3.0-windows-x64-portable.zip",
+      "url": "file:///D:/Development/gitshark/dist-release/gitshark-v1.3.1-windows-x64-portable.zip",
       "hash": "ba76c11818eacea199aad03bd498c123e003bef9b22ef52808049874bfb9b7e5"
     }
   },
