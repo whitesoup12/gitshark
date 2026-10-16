@@ -68,12 +68,21 @@ function updateSha256SumsFile(entries) {
 }
 
 function renderCaskContent({ version, repoSlug, armHash, intelHash }) {
+  let shaSection = "sha256 :no_check";
+  const isValidHash = (h) => typeof h === "string" && h.length === 64 && !h.startsWith("0000") && !h.includes("PLACEHOLDER");
+  if (isValidHash(armHash) && isValidHash(intelHash)) {
+    shaSection = `sha256 arm:   "${armHash}",\n         intel: "${intelHash}"`;
+  } else if (isValidHash(armHash)) {
+    shaSection = `sha256 "${armHash}"`;
+  } else if (isValidHash(intelHash)) {
+    shaSection = `sha256 "${intelHash}"`;
+  }
+
   return `cask "gitshark" do
   arch arm: "aarch64", intel: "x64"
 
   version "${version}"
-  sha256 arm:   "${armHash}",
-         intel: "${intelHash}"
+  ${shaSection}
 
   url "https://github.com/${repoSlug}/releases/download/v#{version}/GitShark_#{version}_#{arch}.dmg"
   name "GitShark"

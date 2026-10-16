@@ -133,6 +133,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -178,5 +179,7 @@ jobs:
           git add Casks/ packaging/ bucket/
           if ! git diff --staged --quiet; then
             git commit -m "chore(release): update cask and scoop manifests for ${{ github.event.inputs.tag || github.ref_name }} [skip ci]"
+            git fetch origin main
+            git rebase origin/main || true
             git push origin HEAD:main
           fi
