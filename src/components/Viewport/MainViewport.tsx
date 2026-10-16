@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Tab, CommitNode } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { formatShortHash } from "@/lib/utils";
 import { getCommitGraphIpc, listenToStatusChanged } from "@/lib/ipc";
 import { CommitGraphCanvas } from "@/components/graph/CommitGraphCanvas";
 import { CommitInspector } from "@/components/graph/CommitInspector";
+import { CommitContextMenu } from "@/components/graph/CommitContextMenu";
 import { WorkspaceDiffSplit } from "@/components/workspace/WorkspaceDiffSplit";
 import {
   GitCommit,
@@ -13,6 +14,11 @@ import {
   AlertCircle,
   Clock,
   RefreshCw,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  X,
+  Filter,
 } from "lucide-react";
 
 interface MainViewportProps {
@@ -20,13 +26,37 @@ interface MainViewportProps {
 }
 
 export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
-  const { setActiveView, updateTab } = useWorkspaceStore();
+  const {
+    setActiveView,
+    updateTab,
+    executeCherryPick,
+    executeRevert,
+    checkoutCommit,
+    createBranch,
+    createTag,
+    resetToCommit,
+  } = useWorkspaceStore();
   const metadata = tab.metadata;
 
   const [commits, setCommits] = useState<CommitNode[]>([]);
   const [isLoadingGraph, setIsLoadingGraph] = useState(false);
   const selectedHashRef = React.useRef(tab.selectedCommitHash);
   selectedHashRef.current = tab.selectedCommitHash;
+
+  // Commit Graph Search & Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [filterOnlyMatches, setFilterOnlyMatches] = useState(false);
+  const [activeMatchCursor, setActiveMatchCursor] = useState(0);
+  const [scrollToRowIndex, setScrollToRowIndex] = useState<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Right-click Commit Context Menu state
+  const [contextMenu, setContextMenu] = useState<{
+    commit: CommitNode;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Fetch topological commit DAG whenever repoId changes or refresh is requested
   const loadCommitGraph = useCallback(async (silent = false) => {
@@ -88,8 +118,87 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
     };
   }, [tab.repoId, tab.activeView, loadCommitGraph]);
 
+  // 4. Ctrl+F / Cmd+F keyboard shortcut to open Commit Graph search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (tab.activeView !== "graph") return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        setTimeout(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        }, 20);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [tab.activeView]);
+
+  // Compute matching commits for search query
+  const matchedCommits = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return commits.filter((c) => {
+      if (c.summary.toLowerCase().includes(q)) return true;
+      if (c.hash.toLowerCase().includes(q)) return true;
+      if (c.author.toLowerCase().includes(q)) return true;
+      if (c.author_email.toLowerCase().includes(q)) return true;
+      if (c.refs?.some((r) => r.shorthand.toLowerCase().includes(q))) return true;
+      return false;
+    });
+  }, [commits, searchQuery]);
+
+  const matchedCommitHashes = useMemo(() => {
+    return new Set(matchedCommits.map((c) => c.hash));
+  }, [matchedCommits]);
+
+  const displayedCommits = useMemo(() => {
+    if (filterOnlyMatches && searchQuery.trim()) {
+      return matchedCommits;
+    }
+    return commits;
+  }, [commits, matchedCommits, filterOnlyMatches, searchQuery]);
+
+  const jumpToMatch = useCallback(
+    (cursorIndex: number) => {
+      if (matchedCommits.length === 0) return;
+      const normalized =
+        ((cursorIndex % matchedCommits.length) + matchedCommits.length) %
+        matchedCommits.length;
+      setActiveMatchCursor(normalized);
+      const targetHash = matchedCommits[normalized].hash;
+      updateTab(tab.id, { selectedCommitHash: targetHash });
+
+      const rowIdx = displayedCommits.findIndex((c) => c.hash === targetHash);
+      if (rowIdx !== -1) {
+        setScrollToRowIndex(rowIdx);
+      }
+    },
+    [matchedCommits, displayedCommits, tab.id, updateTab]
+  );
+
+  // Auto-jump to first match when search query changes
+  useEffect(() => {
+    if (matchedCommits.length > 0 && searchQuery.trim()) {
+      setActiveMatchCursor(0);
+      const firstHash = matchedCommits[0].hash;
+      updateTab(tab.id, { selectedCommitHash: firstHash });
+      const rowIdx = displayedCommits.findIndex((c) => c.hash === firstHash);
+      if (rowIdx !== -1) {
+        setScrollToRowIndex(rowIdx);
+      }
+    } else {
+      setScrollToRowIndex(null);
+    }
+  }, [searchQuery, filterOnlyMatches]);
+
   const handleSelectCommit = (hash: string) => {
     updateTab(tab.id, { selectedCommitHash: hash });
+  };
+
+  const handleContextMenuCommit = (commit: CommitNode, x: number, y: number) => {
+    setContextMenu({ commit, x, y });
   };
 
   const selectedCommit = commits.find(
@@ -139,6 +248,34 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
 
         {/* Right: Repository Working Directory Badges & Refresh */}
         <div className="flex items-center gap-2 text-xs">
+          {tab.activeView === "graph" && (
+            <button
+              onClick={() => {
+                setIsSearchOpen((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setTimeout(() => searchInputRef.current?.focus(), 20);
+                  } else {
+                    setSearchQuery("");
+                  }
+                  return next;
+                });
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-medium transition-colors ${
+                isSearchOpen || searchQuery.trim()
+                  ? "bg-amber-500/15 border-amber-500/40 text-amber-300"
+                  : "bg-shark-950/60 border-shark-800 text-slate-400 hover:text-slate-200 hover:bg-shark-800"
+              }`}
+              title="Search Commits by message, SHA, author, or branch/tag (Ctrl+F)"
+            >
+              <Search className="w-3 h-3" />
+              <span>Find Commit</span>
+              <kbd className="hidden sm:inline-block text-[9px] px-1 py-0.2 rounded bg-shark-900 border border-shark-750 text-slate-500 font-mono">
+                Ctrl+F
+              </kbd>
+            </button>
+          )}
+
           <button
             onClick={() => loadCommitGraph()}
             disabled={isLoadingGraph}
@@ -195,21 +332,142 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
                   {metadata?.head_commit_summary ?? "No commit summary"}
                 </span>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                <Clock className="w-3 h-3 text-slate-500" />
-                <span>HEAD</span>
+              <div className="flex items-center gap-3 text-[11px] text-slate-400 flex-shrink-0">
+                <span className="hidden md:inline-block text-[10px] text-slate-500">
+                  Right-click any commit for Cherry-Pick, Revert, Branch, Tag, or Reset
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-slate-500" />
+                  <span>HEAD</span>
+                </div>
               </div>
             </div>
+
+            {/* Search & Filter Bar (Ctrl+F) */}
+            {isSearchOpen && (
+              <div className="px-4 py-1.5 bg-shark-900/95 border-b border-shark-800 flex items-center justify-between gap-3 text-xs z-10">
+                <div className="flex items-center gap-2 flex-1 max-w-xl">
+                  <Search className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        jumpToMatch(e.shiftKey ? activeMatchCursor - 1 : activeMatchCursor + 1);
+                      } else if (e.key === "Escape") {
+                        setIsSearchOpen(false);
+                        setSearchQuery("");
+                      }
+                    }}
+                    placeholder="Search commits by message, SHA, author, branch, or tag..."
+                    className="flex-1 bg-shark-950 border border-shark-750 focus:border-amber-400/60 rounded px-2.5 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
+                  />
+
+                  {searchQuery.trim() && (
+                    <span
+                      className={`text-[11px] font-mono px-2 py-0.5 rounded border flex-shrink-0 ${
+                        matchedCommits.length > 0
+                          ? "bg-amber-950/50 border-amber-700/40 text-amber-300"
+                          : "bg-rose-950/50 border-rose-800/40 text-rose-400"
+                      }`}
+                    >
+                      {matchedCommits.length > 0
+                        ? `${activeMatchCursor + 1} / ${matchedCommits.length}`
+                        : "0 matches"}
+                    </span>
+                  )}
+
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={() => jumpToMatch(activeMatchCursor - 1)}
+                      disabled={matchedCommits.length === 0}
+                      className="p-1 rounded bg-shark-800 hover:bg-shark-750 disabled:opacity-40 text-slate-300 transition-colors"
+                      title="Previous match (Shift+Enter)"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => jumpToMatch(activeMatchCursor + 1)}
+                      disabled={matchedCommits.length === 0}
+                      className="p-1 rounded bg-shark-800 hover:bg-shark-750 disabled:opacity-40 text-slate-300 transition-colors"
+                      title="Next match (Enter)"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setFilterOnlyMatches((prev) => !prev)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+                      filterOnlyMatches
+                        ? "bg-sky-500/20 border-sky-500/40 text-sky-300"
+                        : "bg-shark-800 border-shark-750 text-slate-400 hover:text-slate-200"
+                    }`}
+                    title="Toggle between Highlight-in-DAG mode and Filter-Rows mode"
+                  >
+                    <Filter className="w-3 h-3" />
+                    <span>{filterOnlyMatches ? "Filtered Rows" : "Highlight in Graph"}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsSearchOpen(false);
+                      setSearchQuery("");
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800 transition-colors"
+                    title="Close search (Esc)"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Virtualized Canvas Rendering Engine */}
             <div className="flex-1 flex flex-col overflow-hidden relative">
               <CommitGraphCanvas
-                commits={commits}
+                commits={displayedCommits}
                 selectedCommitHash={tab.selectedCommitHash}
                 onSelectCommit={handleSelectCommit}
+                onContextMenuCommit={handleContextMenuCommit}
+                matchedCommitHashes={searchQuery.trim() ? matchedCommitHashes : undefined}
+                scrollToRowIndex={scrollToRowIndex}
                 isLoading={isLoadingGraph}
               />
             </div>
+
+            {/* Right-Click Context Menu for Commit Nodes */}
+            {contextMenu && (
+              <CommitContextMenu
+                commit={contextMenu.commit}
+                position={{ x: contextMenu.x, y: contextMenu.y }}
+                currentBranch={metadata?.current_branch ?? "HEAD"}
+                onClose={() => setContextMenu(null)}
+                onCherryPick={(c) => {
+                  executeCherryPick(tab.id, c.hash);
+                }}
+                onRevert={(c) => {
+                  executeRevert(tab.id, c.hash);
+                }}
+                onCheckoutCommit={(c) => {
+                  checkoutCommit(tab.id, c.hash);
+                }}
+                onCreateBranchFromCommit={async (c, branchName, checkout) => {
+                  await createBranch(tab.id, branchName, c.hash, checkout);
+                }}
+                onCreateTagFromCommit={async (c, tagName, message) => {
+                  await createTag(tab.id, tagName, c.hash, message, false);
+                }}
+                onResetToCommit={async (c, mode) => {
+                  await resetToCommit(tab.id, c.hash, mode);
+                }}
+              />
+            )}
 
             {/* Selected Commit Inspection Drawer */}
             {selectedCommit && (

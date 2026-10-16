@@ -1418,6 +1418,158 @@ pub async fn open_in_browser(app_handle: AppHandle, url: String) -> Result<(), S
         .map_err(|e| format!("Failed to open browser: {e}"))
 }
 
+#[tauri::command]
+pub async fn execute_git_cherry_pick(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    commit_sha: String,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let args = vec!["cherry-pick".to_string(), commit_sha.trim().to_string()];
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn execute_git_revert(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    commit_sha: String,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let args = vec![
+        "revert".to_string(),
+        "--no-edit".to_string(),
+        commit_sha.trim().to_string(),
+    ];
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn checkout_commit(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    commit_sha: String,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::checkout_commit(&repo, &commit_sha)
+}
+
+#[tauri::command]
+pub async fn reset_to_commit(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    commit_sha: String,
+    mode: String,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::reset_to_commit(&repo, &commit_sha, &mode)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SharkStatsData {
+    pub commits_swum: u64,
+    pub changes_chomped: u64,
+    pub pushes_launched: u64,
+    pub stashes_buried: u64,
+    #[serde(default)]
+    pub merges_to_main: u64,
+    #[serde(default)]
+    pub storage_path: String,
+}
+
+fn resolve_shark_stats_path() -> std::path::PathBuf {
+    let home_dir = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    home_dir.join(".gitshark").join("shark_stats.json")
+}
+
+#[tauri::command]
+pub fn get_shark_stats() -> Result<SharkStatsData, String> {
+    let path = resolve_shark_stats_path();
+    let path_str = path.to_string_lossy().to_string();
+
+    if path.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(mut parsed) = serde_json::from_str::<SharkStatsData>(&content) {
+                parsed.storage_path = path_str;
+                return Ok(parsed);
+            }
+        }
+    }
+
+    Ok(SharkStatsData {
+        commits_swum: 0,
+        changes_chomped: 0,
+        pushes_launched: 0,
+        stashes_buried: 0,
+        merges_to_main: 0,
+        storage_path: path_str,
+    })
+}
+
+#[tauri::command]
+pub fn save_shark_stats(mut stats: SharkStatsData) -> Result<SharkStatsData, String> {
+    let path = resolve_shark_stats_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create ~/.gitshark directory: {e}"))?;
+    }
+
+    stats.storage_path = path.to_string_lossy().to_string();
+    let json = serde_json::to_string_pretty(&stats)
+        .map_err(|e| format!("Failed to serialize shark stats: {e}"))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write shark stats to {}: {e}", stats.storage_path))?;
+
+    Ok(stats)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1438,4 +1590,12 @@ mod tests {
             assert!(res.unwrap().contains("git version"));
         }
     }
+
+    #[test]
+    fn test_shark_stats_path_resolution() {
+        let path = resolve_shark_stats_path();
+        assert!(path.to_string_lossy().contains(".gitshark"));
+        assert!(path.to_string_lossy().ends_with("shark_stats.json"));
+    }
 }
+

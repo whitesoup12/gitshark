@@ -1118,3 +1118,99 @@ export async function openInBrowserIpc(url: string): Promise<void> {
   return await invoke<void>("open_in_browser", { url });
 }
 
+/**
+ * Execute git cherry-pick <commitSha> in PTY
+ */
+export async function executeGitCherryPickIpc(
+  repoId: string,
+  commitSha: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git cherry-pick ${commitSha}`);
+    return;
+  }
+  return await invoke<void>("execute_git_cherry_pick", { repoId, commitSha });
+}
+
+/**
+ * Execute git revert --no-edit <commitSha> in PTY
+ */
+export async function executeGitRevertIpc(
+  repoId: string,
+  commitSha: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git revert --no-edit ${commitSha}`);
+    return;
+  }
+  return await invoke<void>("execute_git_revert", { repoId, commitSha });
+}
+
+/**
+ * Checkout a commit SHA in detached HEAD state
+ */
+export async function checkoutCommitIpc(
+  repoId: string,
+  commitSha: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] checkout_commit ${commitSha}`);
+    return;
+  }
+  return await invoke<void>("checkout_commit", { repoId, commitSha });
+}
+
+/**
+ * Reset current branch / HEAD to a target commit SHA (soft, mixed, hard)
+ */
+export async function resetToCommitIpc(
+  repoId: string,
+  commitSha: string,
+  mode: "soft" | "mixed" | "hard"
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] git reset --${mode} ${commitSha}`);
+    return;
+  }
+  return await invoke<void>("reset_to_commit", { repoId, commitSha, mode });
+}
+
+export interface SharkStatsData {
+  commits_swum: number;
+  changes_chomped: number;
+  pushes_launched: number;
+  stashes_buried: number;
+  merges_to_main?: number;
+  storage_path?: string;
+}
+
+/**
+ * Load persistent Shark Stats from ~/.gitshark/shark_stats.json in user's home profile
+ */
+export async function getSharkStatsIpc(): Promise<SharkStatsData> {
+  if (!isTauriEnvironment()) {
+    return {
+      commits_swum: 0,
+      changes_chomped: 0,
+      pushes_launched: 0,
+      stashes_buried: 0,
+      merges_to_main: 0,
+      storage_path: "~/.gitshark/shark_stats.json",
+    };
+  }
+  return await invoke<SharkStatsData>("get_shark_stats");
+}
+
+/**
+ * Save persistent Shark Stats to ~/.gitshark/shark_stats.json in user's home profile
+ */
+export async function saveSharkStatsIpc(
+  stats: SharkStatsData
+): Promise<SharkStatsData> {
+  if (!isTauriEnvironment()) {
+    return stats;
+  }
+  return await invoke<SharkStatsData>("save_shark_stats", { stats });
+}
+
+

@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useSharkStore } from "@/store/useSharkStore";
 import { TabBar } from "@/components/TabBar/TabBar";
 import { WorkspaceShell } from "@/components/Layout/WorkspaceShell";
 import { EmptyWorkspace } from "@/components/EmptyState/EmptyWorkspace";
@@ -11,12 +12,14 @@ import { SharkCelebrationOverlay, SharkWisdomModal } from "@/components/common/S
 export const App: React.FC = () => {
   const { tabs, activeTabId } = useWorkspaceStore();
   const { initSettings, openSettings, isSettingsOpen, closeSettings } = useSettingsStore();
+  const { initSharkStats } = useSharkStore();
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   useEffect(() => {
     initSettings();
-  }, [initSettings]);
+    initSharkStats();
+  }, [initSettings, initSharkStats]);
 
   // Global keyboard shortcuts: Ctrl+, / Cmd+, for Settings, Escape to close
   useEffect(() => {

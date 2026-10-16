@@ -1787,6 +1787,46 @@ pub fn delete_tag(repo: &Repository, tag_name: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to delete tag '{clean_name}': {e}"))
 }
 
+/// Checkout a specific commit SHA in detached HEAD state
+pub fn checkout_commit(repo: &Repository, commit_sha: &str) -> Result<(), String> {
+    let oid = git2::Oid::from_str(commit_sha.trim())
+        .map_err(|e| format!("Invalid commit SHA '{commit_sha}': {e}"))?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit not found: {e}"))?;
+    let obj = commit.into_object();
+
+    let mut checkout_builder = git2::build::CheckoutBuilder::new();
+    checkout_builder.safe();
+    repo.checkout_tree(&obj, Some(&mut checkout_builder))
+        .map_err(|e| format!("Failed to checkout commit tree: {e}"))?;
+    repo.set_head_detached(oid)
+        .map_err(|e| format!("Failed to set detached HEAD to {oid}: {e}"))?;
+
+    Ok(())
+}
+
+/// Reset current HEAD / branch to a target commit SHA using soft, mixed, or hard mode
+pub fn reset_to_commit(repo: &Repository, commit_sha: &str, mode: &str) -> Result<(), String> {
+    let oid = git2::Oid::from_str(commit_sha.trim())
+        .map_err(|e| format!("Invalid commit SHA '{commit_sha}': {e}"))?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit not found: {e}"))?;
+    let obj = commit.into_object();
+
+    let reset_type = match mode.trim().to_lowercase().as_str() {
+        "soft" => git2::ResetType::Soft,
+        "hard" => git2::ResetType::Hard,
+        _ => git2::ResetType::Mixed,
+    };
+
+    repo.reset(&obj, reset_type, None)
+        .map_err(|e| format!("Failed to reset ({mode}) to {oid}: {e}"))?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1919,6 +1959,49 @@ mod tests {
 
         let _ = fs::remove_dir_all(&test_dir);
     }
+
+    #[test]
+    fn test_checkout_and_reset_commit() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_commit_ops_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+        let sig = git2::Signature::now("Tester", "tester@test.local").unwrap();
+
+        // Commit 1
+        let file_path = test_dir.join("notes.txt");
+        {
+            let mut f = File::create(&file_path).unwrap();
+            writeln!(f, "v1").unwrap();
+        }
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("notes.txt")).unwrap();
+        index.write().unwrap();
+        let tree1 = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let c1_oid = repo.commit(Some("HEAD"), &sig, &sig, "Commit 1", &tree1, &[]).unwrap();
+        let c1 = repo.find_commit(c1_oid).unwrap();
+
+        // Commit 2
+        {
+            let mut f = File::create(&file_path).unwrap();
+            writeln!(f, "v2").unwrap();
+        }
+        let mut index2 = repo.index().unwrap();
+        index2.add_path(std::path::Path::new("notes.txt")).unwrap();
+        index2.write().unwrap();
+        let tree2 = repo.find_tree(index2.write_tree().unwrap()).unwrap();
+        let _c2_oid = repo.commit(Some("HEAD"), &sig, &sig, "Commit 2", &tree2, &[&c1]).unwrap();
+
+        // Soft reset to Commit 1
+        reset_to_commit(&repo, &c1_oid.to_string(), "soft").unwrap();
+        let head_after_reset = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head_after_reset.id(), c1_oid);
+
+        // Detached checkout to Commit 1
+        checkout_commit(&repo, &c1_oid.to_string()).unwrap();
+        assert!(repo.head_detached().unwrap());
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
 }
+
 
 

@@ -17,6 +17,8 @@ import {
   Plus,
   Trash2,
   UploadCloud,
+  GitPullRequest,
+  Undo2,
 } from "lucide-react";
 import { formatShortHash } from "@/lib/utils";
 import { getCommitDetailsIpc, getCommitFileDiffIpc } from "@/lib/ipc";
@@ -35,7 +37,8 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
   onClose,
   onSelectCommit,
 }) => {
-  const { activeTabId, createTag, deleteTag, pushTag } = useWorkspaceStore();
+  const { activeTabId, createTag, deleteTag, pushTag, executeCherryPick, executeRevert } =
+    useWorkspaceStore();
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [details, setDetails] = useState<CommitDetails | null>(null);
@@ -325,6 +328,28 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
             <Bookmark className="w-3 h-3 text-amber-400" />
             <span>Tag</span>
           </button>
+
+          {activeTabId && (
+            <>
+              <button
+                onClick={() => executeCherryPick(activeTabId, commit.hash)}
+                className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border bg-shark-800 hover:bg-shark-750 text-slate-300 border-shark-700 hover:text-emerald-300 transition-colors flex-shrink-0"
+                title="Cherry-pick this commit onto current branch"
+              >
+                <GitPullRequest className="w-3 h-3 text-emerald-400" />
+                <span>Cherry-Pick</span>
+              </button>
+
+              <button
+                onClick={() => executeRevert(activeTabId, commit.hash)}
+                className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border bg-shark-800 hover:bg-shark-750 text-slate-300 border-shark-700 hover:text-amber-300 transition-colors flex-shrink-0"
+                title="Revert this commit (create inverse commit)"
+              >
+                <Undo2 className="w-3 h-3 text-amber-400" />
+                <span>Revert</span>
+              </button>
+            </>
+          )}
 
           {details && (
             <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono flex-shrink-0">

@@ -4,7 +4,7 @@ import { TabItem } from "./TabItem";
 import { Plus, Terminal as TerminalIcon, Download, Globe, GitPullRequest } from "lucide-react";
 import { SyncButton } from "./SyncButton";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
-import { useSharkStore } from "@/store/useSharkStore";
+import { useSharkStore, computeSharkRank } from "@/store/useSharkStore";
 
 export const TabBar: React.FC = () => {
   const {
@@ -18,7 +18,8 @@ export const TabBar: React.FC = () => {
     openRepoInBrowser,
     createPullRequestInBrowser,
   } = useWorkspaceStore();
-  const { openWisdom } = useSharkStore();
+  const { openWisdom, stats } = useSharkStore();
+  const rankInfo = computeSharkRank(stats);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
@@ -26,15 +27,21 @@ export const TabBar: React.FC = () => {
     <header className="flex items-center justify-between bg-shark-950 border-b border-shark-800 h-10 select-none px-2 z-20">
       {/* Left side: Tabs container */}
       <div className="flex items-center h-full overflow-x-auto no-scrollbar max-w-[calc(100vw-220px)]">
-        {/* App Logo / Mark */}
+        {/* App Logo / Mark + Shark Rank Pill */}
         <button
           onClick={() => openWisdom()}
           className="flex items-center gap-2 px-2.5 py-1 font-bold tracking-tight text-sm select-none border-r border-shark-800 mr-1 flex-shrink-0 group cursor-pointer hover:bg-shark-900/60 rounded transition-all text-left"
-          title="GitShark - Click for Shark Wisdom & Easter Eggs 🦈"
+          title={`GitShark — ${rankInfo.emoji} ${rankInfo.title} (Lv.${rankInfo.level} • ${rankInfo.totalScore} XP) — Click for Shark Telemetry & Wisdom`}
         >
           <GitSharkLogo size="sm" withBackground={false} withGlow={true} className="transition-transform group-hover:scale-110 group-hover:rotate-6 duration-200" />
           <span className="bg-gradient-to-r from-sky-400 via-teal-300 to-sky-200 bg-clip-text text-transparent font-extrabold tracking-wide">
             GitShark
+          </span>
+          <span
+            className={`hidden md:inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded border ${rankInfo.badgeClass}`}
+          >
+            <span>{rankInfo.emoji}</span>
+            <span>Lv.{rankInfo.level}</span>
           </span>
         </button>
 

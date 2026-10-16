@@ -1,9 +1,118 @@
 import { create } from "zustand";
+import { getSharkStatsIpc, saveSharkStatsIpc } from "@/lib/ipc";
 
 export interface SharkCelebration {
   id: string;
   type: "swim" | "frenzy" | "chomp";
   message?: string;
+}
+
+export interface SharkStats {
+  commitsSwum: number;
+  changesChomped: number;
+  pushesLaunched: number;
+  stashesBuried: number;
+  mergesToMain: number;
+  storagePath: string;
+}
+
+export const XP_PER_COMMIT = 1;
+export const XP_PER_PUSH = 5;
+export const XP_PER_MAIN_MERGE = 10;
+
+export interface SharkRankInfo {
+  level: number;
+  title: string;
+  emoji: string;
+  minScore: number;
+  nextScore: number | null;
+  totalScore: number;
+  progressPct: number;
+  glowColor: string;
+  badgeClass: string;
+}
+
+export const SHARK_RANKS: {
+  level: number;
+  title: string;
+  emoji: string;
+  minScore: number;
+  nextScore: number | null;
+  glowColor: string;
+  badgeClass: string;
+}[] = [
+  {
+    level: 1,
+    title: "Reef Pup",
+    emoji: "🐟",
+    minScore: 0,
+    nextScore: 1000,
+    glowColor: "#38bdf8",
+    badgeClass: "bg-sky-950/70 text-sky-300 border-sky-700/50",
+  },
+  {
+    level: 2,
+    title: "Mako Sprinter",
+    emoji: "⚡",
+    minScore: 1000,
+    nextScore: 3000,
+    glowColor: "#34d399",
+    badgeClass: "bg-emerald-950/70 text-emerald-300 border-emerald-700/50",
+  },
+  {
+    level: 3,
+    title: "Hammerhead Navigator",
+    emoji: "🔨",
+    minScore: 3000,
+    nextScore: 9000,
+    glowColor: "#fbbf24",
+    badgeClass: "bg-amber-950/70 text-amber-300 border-amber-700/50",
+  },
+  {
+    level: 4,
+    title: "Great White Apex",
+    emoji: "🦈",
+    minScore: 9000,
+    nextScore: 27000,
+    glowColor: "#818cf8",
+    badgeClass: "bg-indigo-950/70 text-indigo-300 border-indigo-700/50",
+  },
+  {
+    level: 5,
+    title: "Cyber Megalodon",
+    emoji: "🌊",
+    minScore: 27000,
+    nextScore: null,
+    glowColor: "#c084fc",
+    badgeClass: "bg-purple-950/80 text-purple-300 border-purple-600/60",
+  },
+];
+
+export function computeSharkRank(stats: SharkStats): SharkRankInfo {
+  const totalScore =
+    stats.commitsSwum * XP_PER_COMMIT +
+    stats.pushesLaunched * XP_PER_PUSH +
+    (stats.mergesToMain || 0) * XP_PER_MAIN_MERGE;
+
+  let current = SHARK_RANKS[0];
+  for (const tier of SHARK_RANKS) {
+    if (totalScore >= tier.minScore) {
+      current = tier;
+    }
+  }
+
+  let progressPct = 100;
+  if (current.nextScore !== null) {
+    const span = current.nextScore - current.minScore;
+    const intoTier = totalScore - current.minScore;
+    progressPct = Math.min(100, Math.max(0, Math.round((intoTier / span) * 100)));
+  }
+
+  return {
+    ...current,
+    totalScore,
+    progressPct,
+  };
 }
 
 export const SHARK_WISDOM_QUOTES = [
@@ -29,6 +138,42 @@ export const SHARK_WISDOM_QUOTES = [
 
 const STORAGE_CELEBRATIONS = "gitshark_celebrations_enabled";
 const STORAGE_WISDOM = "gitshark_wisdom_enabled";
+const STORAGE_STATS = "gitshark_feeding_stats";
+
+function loadLocalStats(): SharkStats {
+  try {
+    const raw = localStorage.getItem(STORAGE_STATS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        commitsSwum: Number(parsed.commitsSwum) || 0,
+        changesChomped: Number(parsed.changesChomped) || 0,
+        pushesLaunched: Number(parsed.pushesLaunched) || 0,
+        stashesBuried: Number(parsed.stashesBuried) || 0,
+        mergesToMain: Number(parsed.mergesToMain) || 0,
+        storagePath: parsed.storagePath || "~/.gitshark/shark_stats.json",
+      };
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return {
+    commitsSwum: 0,
+    changesChomped: 0,
+    pushesLaunched: 0,
+    stashesBuried: 0,
+    mergesToMain: 0,
+    storagePath: "~/.gitshark/shark_stats.json",
+  };
+}
+
+function saveLocalStats(stats: SharkStats) {
+  try {
+    localStorage.setItem(STORAGE_STATS, JSON.stringify(stats));
+  } catch {
+    // ignore storage quota errors
+  }
+}
 
 interface SharkStoreState {
   celebrationsEnabled: boolean;
@@ -36,13 +181,22 @@ interface SharkStoreState {
   isWisdomOpen: boolean;
   currentWisdomIndex: number;
   activeCelebration: SharkCelebration | null;
+  stats: SharkStats;
 
+  initSharkStats: () => Promise<void>;
+  recordSharkStat: (
+    kind: "commit" | "chomp" | "push" | "stash" | "main_merge",
+    amount?: number
+  ) => void;
   setCelebrationsEnabled: (enabled: boolean) => void;
   setWisdomEnabled: (enabled: boolean) => void;
   openWisdom: (index?: number) => void;
   closeWisdom: () => void;
   nextWisdom: () => void;
-  triggerCelebration: (type?: "swim" | "frenzy" | "chomp", message?: string) => void;
+  triggerCelebration: (
+    type?: "swim" | "frenzy" | "chomp",
+    message?: string
+  ) => void;
   dismissCelebration: () => void;
 }
 
@@ -53,12 +207,117 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
   const savedWisdom = localStorage.getItem(STORAGE_WISDOM);
   const wisdomEnabled = savedWisdom !== null ? savedWisdom === "true" : true;
 
+  const initialStats = loadLocalStats();
+
   return {
     celebrationsEnabled,
     wisdomEnabled,
     isWisdomOpen: false,
     currentWisdomIndex: Math.floor(Math.random() * SHARK_WISDOM_QUOTES.length),
     activeCelebration: null,
+    stats: initialStats,
+
+    initSharkStats: async () => {
+      try {
+        const diskStats = await getSharkStatsIpc();
+        const local = get().stats;
+
+        // Merge disk ~/.gitshark/shark_stats.json with localStorage using Math.max
+        // so stats survive app reinstalls, portable folder moves, or cache clears
+        const merged: SharkStats = {
+          commitsSwum: Math.max(local.commitsSwum, diskStats.commits_swum || 0),
+          changesChomped: Math.max(
+            local.changesChomped,
+            diskStats.changes_chomped || 0
+          ),
+          pushesLaunched: Math.max(
+            local.pushesLaunched,
+            diskStats.pushes_launched || 0
+          ),
+          stashesBuried: Math.max(
+            local.stashesBuried,
+            diskStats.stashes_buried || 0
+          ),
+          mergesToMain: Math.max(
+            local.mergesToMain || 0,
+            diskStats.merges_to_main || 0
+          ),
+          storagePath:
+            diskStats.storage_path ||
+            local.storagePath ||
+            "~/.gitshark/shark_stats.json",
+        };
+
+        saveLocalStats(merged);
+        set({ stats: merged });
+
+        // Persist merged stats back to ~/.gitshark/shark_stats.json
+        await saveSharkStatsIpc({
+          commits_swum: merged.commitsSwum,
+          changes_chomped: merged.changesChomped,
+          pushes_launched: merged.pushesLaunched,
+          stashes_buried: merged.stashesBuried,
+          merges_to_main: merged.mergesToMain,
+          storage_path: merged.storagePath,
+        });
+      } catch (err) {
+        console.warn("Failed to sync shark stats from user home directory:", err);
+      }
+    },
+
+    recordSharkStat: (
+      kind: "commit" | "chomp" | "push" | "stash" | "main_merge",
+      amount = 1
+    ) => {
+      const prevStats = get().stats;
+      const prevRank = computeSharkRank(prevStats);
+
+      const nextStats: SharkStats = {
+        ...prevStats,
+        commitsSwum:
+          kind === "commit" ? prevStats.commitsSwum + amount : prevStats.commitsSwum,
+        changesChomped:
+          kind === "chomp"
+            ? prevStats.changesChomped + amount
+            : prevStats.changesChomped,
+        pushesLaunched:
+          kind === "push"
+            ? prevStats.pushesLaunched + amount
+            : prevStats.pushesLaunched,
+        stashesBuried:
+          kind === "stash"
+            ? prevStats.stashesBuried + amount
+            : prevStats.stashesBuried,
+        mergesToMain:
+          kind === "main_merge"
+            ? (prevStats.mergesToMain || 0) + amount
+            : prevStats.mergesToMain || 0,
+      };
+
+      saveLocalStats(nextStats);
+      set({ stats: nextStats });
+
+      const nextRank = computeSharkRank(nextStats);
+      if (nextRank.level > prevRank.level) {
+        setTimeout(() => {
+          get().triggerCelebration(
+            nextRank.level >= 5 ? "frenzy" : "swim",
+            `${nextRank.emoji} SHARK RANK UP: ${nextRank.title}!`
+          );
+        }, 250);
+      }
+
+      saveSharkStatsIpc({
+        commits_swum: nextStats.commitsSwum,
+        changes_chomped: nextStats.changesChomped,
+        pushes_launched: nextStats.pushesLaunched,
+        stashes_buried: nextStats.stashesBuried,
+        merges_to_main: nextStats.mergesToMain,
+        storage_path: nextStats.storagePath,
+      }).catch((err) => {
+        console.warn("Failed to write shark stats to disk:", err);
+      });
+    },
 
     setCelebrationsEnabled: (enabled: boolean) => {
       localStorage.setItem(STORAGE_CELEBRATIONS, String(enabled));
@@ -87,11 +346,15 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
     },
 
     nextWisdom: () => {
-      const nextIdx = (get().currentWisdomIndex + 1) % SHARK_WISDOM_QUOTES.length;
+      const nextIdx =
+        (get().currentWisdomIndex + 1) % SHARK_WISDOM_QUOTES.length;
       set({ currentWisdomIndex: nextIdx });
     },
 
-    triggerCelebration: (type: "swim" | "frenzy" | "chomp" = "swim", message?: string) => {
+    triggerCelebration: (
+      type: "swim" | "frenzy" | "chomp" = "swim",
+      message?: string
+    ) => {
       if (!get().celebrationsEnabled && type !== "frenzy") return;
       const id = `${Date.now()}-${Math.random()}`;
       set({ activeCelebration: { id, type, message } });
