@@ -17,6 +17,8 @@ import {
   Terminal as TerminalIcon,
   Maximize2,
   Minimize2,
+  Copy,
+  Check,
 } from "lucide-react";
 
 interface TerminalDrawerProps {
@@ -30,6 +32,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Terminal height resizing with persistence
   const [terminalHeight, setTerminalHeight] = useState<number>(() => {
@@ -94,7 +97,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
         background: "#090d16",
         foreground: "#e2e8f0",
         cursor: "#38bdf8",
-        selectionBackground: "#0284c740",
+        selectionBackground: "#0284c755",
         black: "#0f172a",
         red: "#f87171",
         green: "#4ade80",
@@ -103,13 +106,25 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
         magenta: "#c084fc",
         cyan: "#22d3ee",
         white: "#f8fafc",
+        brightBlack: "#475569",
+        brightRed: "#ef4444",
+        brightGreen: "#22c55e",
+        brightYellow: "#eab308",
+        brightBlue: "#0ea5e9",
+        brightMagenta: "#a855f7",
+        brightCyan: "#06b6d4",
+        brightWhite: "#ffffff",
       },
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, Consolas, monospace",
       fontSize: 12,
       lineHeight: 1.25,
       cursorBlink: true,
-      convertEol: true,
-      scrollback: 5000,
+      cursorStyle: "bar",
+      cursorWidth: 2,
+      convertEol: false, // In PTY mode, native PTY handles CR/LF; convertEol=false preserves carriage-return in-place progress rewrites!
+      scrollback: 10000,
+      smoothScrollDuration: 0,
+      allowTransparency: false,
     });
 
     const fitAddon = new FitAddon();
@@ -117,6 +132,11 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
 
     term.open(containerRef.current);
     fitAddon.fit();
+
+    // Immediately sync PTY dimensions so output formatting and progress bars wrap accurately
+    if (term.cols && term.rows) {
+      resizePtyIpc(repoId, term.cols, term.rows).catch(() => {});
+    }
 
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -132,7 +152,35 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
       });
     });
 
-    // Handle resizing
+    // Keep PTY dimensions strictly in sync on every resize
+    const resizeDisposable = term.onResize(({ cols, rows }) => {
+      if (repoId && cols > 0 && rows > 0) {
+        resizePtyIpc(repoId, cols, rows).catch(() => {});
+      }
+    });
+
+    // Custom key handler: Cmd+C copies selected text to clipboard; Cmd+V pastes
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === "keydown") {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection());
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+          return false; // prevent sending SIGINT (\x03)
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+          navigator.clipboard.readText().then((text) => {
+            if (text && repoId) {
+              writePtyInputIpc(repoId, text).catch(() => {});
+            }
+          });
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Handle resizing via container observer
     const resizeObserver = new ResizeObserver(() => {
       try {
         fitAddon.fit();
@@ -153,6 +201,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
     let unlistenExit: (() => void) | null = null;
 
     listenToTerminalData(repoId, (chunk) => {
+      setIsRunning(true);
       term.write(chunk);
     }).then((unlisten) => {
       unlistenData = unlisten;
@@ -169,6 +218,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
 
     return () => {
       inputDisposable.dispose();
+      resizeDisposable.dispose();
       resizeObserver.disconnect();
       if (unlistenData) unlistenData();
       if (unlistenExit) unlistenExit();
@@ -180,6 +230,39 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
 
   const handleClear = () => {
     terminalInstanceRef.current?.clear();
+  };
+
+  const handleCopyOutput = async () => {
+    const term = terminalInstanceRef.current;
+    if (!term) return;
+
+    let textToCopy = "";
+    if (term.hasSelection()) {
+      textToCopy = term.getSelection();
+    } else {
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buffer.length; i++) {
+        const line = buffer.getLine(i);
+        if (line) {
+          lines.push(line.translateToString(true));
+        }
+      }
+      while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
+        lines.pop();
+      }
+      textToCopy = lines.join("\n");
+    }
+
+    if (!textToCopy) return;
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.warn("Failed to copy terminal output:", e);
+    }
   };
 
   const handleStop = async () => {
@@ -234,6 +317,28 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
               <span>Kill</span>
             </button>
           )}
+
+          <button
+            onClick={handleCopyOutput}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+              copied
+                ? "bg-emerald-950/80 text-emerald-300 border border-emerald-700/60"
+                : "text-slate-300 hover:text-white bg-shark-850 hover:bg-shark-800 border border-shark-750"
+            }`}
+            title="Copy selection or all terminal text to clipboard (Cmd+C)"
+          >
+            {copied ? (
+              <>
+                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                <span>Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-2.5 h-2.5 text-slate-400" />
+                <span>Copy</span>
+              </>
+            )}
+          </button>
 
           <div className="h-3 w-[1px] bg-shark-750 mx-1" />
 

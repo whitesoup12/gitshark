@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FileStatusItem, WorkingTreeStatus, Tab } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { showConfirm } from "@/store/useDialogStore";
 import {
   Plus,
   Minus,
@@ -163,11 +164,40 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
   };
 
   const isCommitting = tab?.hookState?.status === "running";
+  const isHookPushing = tab?.hookState?.status === "running" && tab?.hookState?.lastCommand === "push";
+  const effectivePushing = isPushing || isHookPushing;
   const stagedCount = status.staged.length;
   const unstagedCount = status.unstaged.length;
 
   const untrackedCount = status.untracked.length;
   const totalUnstaged = unstagedCount + untrackedCount;
+
+  const confirmAndDiscardFile = async (filePath: string) => {
+    const confirmed = await showConfirm({
+      title: "Discard File Changes",
+      message: `Are you sure you want to discard changes for "${filePath}"?\n\nThis will permanently discard all unstaged modifications in this file.`,
+      confirmText: "Discard Changes",
+      variant: "danger",
+    });
+    if (confirmed) {
+      onDiscardFile(filePath);
+    }
+  };
+
+  const confirmAndDiscardAll = async () => {
+    if (!onDiscardAll) return;
+    const confirmed = await showConfirm({
+      title: "Discard All Changes",
+      message: `Are you sure you want to discard all ${totalUnstaged} unstaged change${
+        totalUnstaged === 1 ? "" : "s"
+      }?\n\nThis will permanently discard modifications and delete untracked files.`,
+      confirmText: "Discard All Changes",
+      variant: "danger",
+    });
+    if (confirmed) {
+      onDiscardAll();
+    }
+  };
 
   const renderFileRow = (item: FileStatusItem, isStaged: boolean) => {
     const isSelected =
@@ -242,9 +272,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (window.confirm(`Are you sure you want to discard changes for "${item.path}"?`)) {
-                    onDiscardFile(item.path);
-                  }
+                  confirmAndDiscardFile(item.path);
                 }}
                 className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-750 transition-colors"
                 title="Discard changes"
@@ -492,17 +520,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
               <div className="flex items-center gap-2">
                 {onDiscardAll && (
                   <button
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Are you sure you want to discard all ${totalUnstaged} unstaged change${
-                            totalUnstaged === 1 ? "" : "s"
-                          }? This will permanently discard modifications and delete untracked files.`
-                        )
-                      ) {
-                        onDiscardAll();
-                      }
-                    }}
+                    onClick={() => confirmAndDiscardAll()}
                     className="text-[11px] text-slate-400 hover:text-rose-400 hover:underline transition-colors"
                     title="Discard all unstaged changes and delete untracked files"
                   >
@@ -630,7 +648,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
             </span>
             <button
               onClick={async () => {
-                if (!tab.repoId || isPushing) return;
+                if (!tab.repoId || effectivePushing || isCommitting) return;
                 setIsPushing(true);
                 try {
                   await executePush(tab.id);
@@ -640,11 +658,11 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
                   setIsPushing(false);
                 }
               }}
-              disabled={isPushing}
+              disabled={effectivePushing || isCommitting}
               className="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-950/70 border border-sky-700/50 text-sky-300 hover:bg-sky-900/60 font-medium text-[10px] transition-colors disabled:opacity-50"
             >
-              <ArrowUp className={`w-2.5 h-2.5 ${isPushing ? "animate-bounce" : ""}`} />
-              <span>{isPushing ? "Pushing..." : "Push now"}</span>
+              <ArrowUp className={`w-2.5 h-2.5 ${effectivePushing ? "animate-bounce" : ""}`} />
+              <span>{effectivePushing ? "Pushing..." : "Push now"}</span>
             </button>
           </div>
         )}
@@ -687,9 +705,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
                 onClick={() => {
                   const p = contextMenu.item!.path;
                   setContextMenu(null);
-                  if (window.confirm(`Are you sure you want to discard changes for "${p}"?`)) {
-                    onDiscardFile(p);
-                  }
+                  confirmAndDiscardFile(p);
                 }}
                 className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-950/40 text-rose-300 text-left transition-colors"
               >
@@ -733,15 +749,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
                 <button
                   onClick={() => {
                     setContextMenu(null);
-                    if (
-                      window.confirm(
-                        `Are you sure you want to discard all ${totalUnstaged} unstaged change${
-                          totalUnstaged === 1 ? "" : "s"
-                        }? This will permanently discard modifications and delete untracked files.`
-                      )
-                    ) {
-                      onDiscardAll();
-                    }
+                    confirmAndDiscardAll();
                   }}
                   className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-950/40 text-rose-300 text-left transition-colors"
                 >

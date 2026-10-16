@@ -1,7 +1,7 @@
 import { RepoMetadata, RepoBranches } from "./repo";
 import { RepoHooksInfo, HookExecutionState } from "./hooks";
 import { WorktreeItem } from "./worktree";
-import { RemoteSyncStatus } from "./remote";
+import { RemoteSyncStatus, PullRequestInfo } from "./remote";
 
 export type WorkspaceView = "graph" | "diff" | "status";
 
@@ -28,6 +28,9 @@ export interface Tab {
   // Milestone 5: Worktrees & Remote sync state
   worktrees?: WorktreeItem[];
   remoteSync?: RemoteSyncStatus;
+
+  // Active Pull Requests for branches
+  pullRequests?: PullRequestInfo[];
 
   // Local & Remote Branches
   branches?: RepoBranches;

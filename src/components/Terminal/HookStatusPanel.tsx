@@ -17,22 +17,23 @@ interface HookStatusPanelProps {
   tab: Tab;
 }
 
-const getStageLabel = (stage: HookStage): string => {
+const getStageLabel = (stage: HookStage, lastCommand?: string | null): string => {
+  const prefix = lastCommand === "dry-run" ? "Dry Run: " : "";
   switch (stage) {
     case "pre-commit":
-      return "Pre-Commit";
+      return `${prefix}Pre-Commit`;
     case "commit-msg":
-      return "Commit-Msg";
+      return `${prefix}Commit-Msg`;
     case "post-commit":
-      return "Post-Commit";
+      return `${prefix}Post-Commit`;
     case "pre-push":
-      return "Pre-Push";
+      return `${prefix}Pre-Push`;
     case "committing":
       return "Git Commit";
     case "pushing":
       return "Git Push";
     default:
-      return "Hook";
+      return `${prefix}${stage}`;
   }
 };
 
@@ -47,7 +48,9 @@ export const HookStatusPanel: React.FC<HookStatusPanelProps> = ({ tab }) => {
     return null;
   }
 
-  const stageLabel = hookState ? getStageLabel(hookState.stage) : "Hooks";
+  const stageLabel = hookState
+    ? getStageLabel(hookState.stage, hookState.lastCommand)
+    : "Hooks";
   const status: HookStatus = hookState?.status ?? "idle";
   const elapsed = hookState ? `${hookState.elapsedSeconds}s` : null;
 
@@ -126,10 +129,10 @@ export const HookStatusPanel: React.FC<HookStatusPanelProps> = ({ tab }) => {
             <button
               onClick={() => retryLastHook(tab.id)}
               className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-medium text-white bg-sky-600 hover:bg-sky-500 transition-colors shadow-sm"
-              title="Retry commit execution"
+              title={hookState?.lastCommand === "dry-run" ? "Re-run hook dry run" : "Retry commit execution"}
             >
               <RotateCcw className="w-2.5 h-2.5" />
-              <span>Retry Commit</span>
+              <span>{hookState?.lastCommand === "dry-run" ? "Re-run Hook" : "Retry Commit"}</span>
             </button>
             <button
               onClick={() => dismissHookStatus(tab.id)}

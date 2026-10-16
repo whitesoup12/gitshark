@@ -18,6 +18,7 @@ import {
   executeGitPushIpc,
   executeGitPullIpc,
   executeGitFetchIpc,
+  backgroundFetchRepositoryIpc,
   executeGitMergeIpc,
   executeGitCherryPickIpc,
   executeGitRevertIpc,
@@ -25,9 +26,11 @@ import {
   resetToCommitIpc,
   cancelActiveProcessIpc,
   getRepoHooksIpc,
+  executeHookDryRunIpc,
   listWorktreesIpc,
   addWorktreeIpc,
   removeWorktreeIpc,
+  pruneWorktreesIpc,
   getRemoteSyncStatusIpc,
   getRepoBranchesIpc,
   checkoutBranchIpc,
@@ -47,9 +50,11 @@ import {
   openInBrowserIpc,
   getCommitGraphIpc,
 } from "@/lib/ipc";
-import { GitTagItem } from "@/types";
+import { GitTagItem, PullRequestInfo } from "@/types";
 import { useSharkStore } from "@/store/useSharkStore";
 import { parseGitRemoteUrl } from "@/lib/remoteUrl";
+import { fetchRepoPullRequests } from "@/lib/pullRequests";
+import { showAlert } from "@/store/useDialogStore";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -70,6 +75,7 @@ interface WorkspaceState {
 
   // Hook & Process Orchestration
   fetchRepoHooks: (tabId: string) => Promise<RepoHooksInfo | null>;
+  executeHookDryRun: (tabId: string, hookName: string) => Promise<boolean>;
   executeCommit: (tabId: string, message: string, amend?: boolean) => Promise<boolean>;
   executePush: (
     tabId: string,
@@ -80,6 +86,7 @@ interface WorkspaceState {
   ) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
+  autoFetchTab: (tabId: string) => Promise<void>;
   executeMerge: (tabId: string, branch: string) => Promise<boolean>;
   executeCherryPick: (tabId: string, commitSha: string) => Promise<boolean>;
   executeRevert: (tabId: string, commitSha: string) => Promise<boolean>;
@@ -97,6 +104,7 @@ interface WorkspaceState {
   fetchWorktrees: (tabId: string) => Promise<WorktreeItem[]>;
   addWorktree: (tabId: string, path: string, branch: string, newBranch?: boolean) => Promise<boolean>;
   removeWorktree: (tabId: string, path: string, force?: boolean) => Promise<boolean>;
+  pruneWorktrees: (tabId: string) => Promise<boolean>;
   fetchRemoteSyncStatus: (tabId: string) => Promise<RemoteSyncStatus | null>;
 
   // Branches
@@ -126,10 +134,12 @@ interface WorkspaceState {
   // Browser Navigation & Pull Requests
   openRepoInBrowser: (tabId: string) => Promise<boolean>;
   createPullRequestInBrowser: (tabId: string, branchName?: string) => Promise<boolean>;
+  fetchPullRequests: (tabId: string) => Promise<PullRequestInfo[]>;
 }
 
 // Module-level timers map for elapsed stopwatch per tab
 const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
+const lastAutoFetchMap = new Map<string, number>();
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   tabs: [],
@@ -243,6 +253,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : tab
         ),
       }));
+      get().autoFetchTab(tabId);
       return tabId;
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -295,10 +306,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       tabs: remainingTabs,
       activeTabId: nextActiveId,
     });
+
+    if (nextActiveId) {
+      get().autoFetchTab(nextActiveId);
+    }
   },
 
   setActiveTab: (tabId: string) => {
     set({ activeTabId: tabId });
+    get().autoFetchTab(tabId);
   },
 
   updateTab: (tabId: string, updates: Partial<Tab>) => {
@@ -350,13 +366,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         refreshEpoch: nextEpoch,
       });
 
-      // Concurrently refresh remote sync, worktrees, branches, stashes, and tags
+      // Concurrently refresh remote sync, worktrees, branches, stashes, tags, and pull requests
       await Promise.allSettled([
         get().fetchRemoteSyncStatus(tabId),
         get().fetchWorktrees(tabId),
         get().fetchBranches(tabId),
         get().fetchStashes(tabId),
         get().fetchTags(tabId),
+        get().fetchPullRequests(tabId),
       ]);
     } catch (err) {
       console.error("Failed to refresh repository metadata:", err);
@@ -877,10 +894,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     get().updateTab(tabId, {
       terminalOpen: true,
       hookState: {
-        stage: "committing",
+        stage: "idle",
         status: "running",
         elapsedSeconds: 0,
-        lastCommand: "pull",
+        lastCommand: "fetch",
         exitCode: null,
         error: null,
       },
@@ -932,10 +949,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           if (payload.success) {
             get().updateTab(tabId, {
               hookState: {
-                stage: "committing",
+                stage: "idle",
                 status: "passed",
                 elapsedSeconds: Number(totalElapsed.toFixed(1)),
-                lastCommand: "pull",
+                lastCommand: "fetch",
                 exitCode: 0,
               },
             });
@@ -954,10 +971,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             get().updateTab(tabId, {
               terminalOpen: true,
               hookState: {
-                stage: "committing",
+                stage: "idle",
                 status: "failed",
                 elapsedSeconds: Number(totalElapsed.toFixed(1)),
-                lastCommand: "pull",
+                lastCommand: "fetch",
                 exitCode: payload.exit_code ?? 1,
                 error: `Fetch failed with exit code ${payload.exit_code ?? 1}`,
               },
@@ -975,10 +992,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         get().updateTab(tabId, {
           terminalOpen: true,
           hookState: {
-            stage: "committing",
+            stage: "idle",
             status: "failed",
             elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
-            lastCommand: "pull",
+            lastCommand: "fetch",
             exitCode: 1,
             error: err instanceof Error ? err.message : String(err),
           },
@@ -986,6 +1003,32 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         resolve(false);
       }
     });
+  },
+
+  autoFetchTab: async (tabId: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return;
+
+    const now = Date.now();
+    const lastTime = lastAutoFetchMap.get(tabId) ?? 0;
+    // Debounce / cooldown of 15 seconds to avoid spamming network when switching tabs
+    if (now - lastTime < 15000) return;
+    lastAutoFetchMap.set(tabId, now);
+
+    try {
+      await backgroundFetchRepositoryIpc(tab.repoId);
+      await Promise.all([
+        get().fetchBranches(tabId),
+        get().fetchRemoteSyncStatus(tabId),
+        get().refreshTabMetadata(tabId),
+      ]);
+    } catch {
+      // Gracefully handle offline or unreachable remote
+      await Promise.all([
+        get().fetchBranches(tabId),
+        get().fetchRemoteSyncStatus(tabId),
+      ]);
+    }
   },
 
   executeMerge: async (tabId: string, branch: string): Promise<boolean> => {
@@ -1388,7 +1431,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to checkout commit:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Checkout Commit Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1417,7 +1464,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to reset to commit:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Reset Commit Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1448,11 +1499,128 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
+  executeHookDryRun: async (tabId: string, hookName: string): Promise<boolean> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    const stage: HookStage = hookName;
+
+    // 1. Open terminal drawer immediately & set running state
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage,
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "dry-run",
+        lastHookName: hookName,
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    if (activeTimers.has(tabId)) {
+      clearInterval(activeTimers.get(tabId)!);
+      activeTimers.delete(tabId);
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const currentTab = get().tabs.find((t) => t.id === tabId);
+      if (currentTab?.hookState && currentTab.hookState.status === "running") {
+        get().updateTab(tabId, {
+          hookState: {
+            ...currentTab.hookState,
+            elapsedSeconds: Number(elapsed.toFixed(1)),
+          },
+        });
+      }
+    }, 100);
+    activeTimers.set(tabId, timer);
+
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (activeTimers.has(tabId)) {
+          clearInterval(activeTimers.get(tabId)!);
+          activeTimers.delete(tabId);
+        }
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage,
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "dry-run",
+                lastHookName: hookName,
+                exitCode: 0,
+              },
+            });
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              hookState: {
+                stage,
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "dry-run",
+                lastHookName: hookName,
+                exitCode: payload.exit_code ?? 1,
+                error: `Hook dry-run failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await executeHookDryRunIpc(repoId, hookName);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage,
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "dry-run",
+            lastHookName: hookName,
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
+  },
+
   retryLastHook: async (tabId: string) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab?.hookState) return;
-    const { lastCommand, lastMessage, lastAmend } = tab.hookState;
-    if (lastCommand === "commit" && lastMessage !== undefined) {
+    const { lastCommand, lastMessage, lastAmend, lastHookName } = tab.hookState;
+    if (lastCommand === "dry-run" && lastHookName) {
+      await get().executeHookDryRun(tabId, lastHookName);
+    } else if (lastCommand === "commit" && lastMessage !== undefined) {
       await get().executeCommit(tabId, lastMessage, lastAmend ?? false);
     } else if (lastCommand === "push") {
       await get().executePush(tabId);
@@ -1514,6 +1682,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
+  pruneWorktrees: async (tabId: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await pruneWorktreesIpc(tab.repoId);
+      await Promise.all([
+        get().fetchWorktrees(tabId),
+        get().fetchBranches(tabId),
+        get().refreshTabMetadata(tabId),
+      ]);
+      return true;
+    } catch (err) {
+      console.error("Failed to prune worktrees:", err);
+      return false;
+    }
+  },
+
   fetchRemoteSyncStatus: async (tabId: string) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return null;
@@ -1568,7 +1754,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to create branch:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Create Branch Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1588,7 +1778,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to delete branch:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Delete Branch Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1619,7 +1813,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to create stash:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Create Stash Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1635,7 +1833,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to apply stash:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Apply Stash Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1655,7 +1857,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to drop stash:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Drop Stash Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1694,7 +1900,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to create tag:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Create Tag Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1710,7 +1920,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return true;
     } catch (err) {
       console.error("Failed to delete tag:", err);
-      alert(err instanceof Error ? err.message : String(err));
+      showAlert({
+        title: "Delete Tag Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1910,6 +2124,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (e) {
       console.error("Failed to open PR in browser:", e);
       return false;
+    }
+  },
+
+  fetchPullRequests: async (tabId: string): Promise<PullRequestInfo[]> => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return [];
+
+    let remoteUrl = tab.metadata?.remote_url;
+    if (!remoteUrl) {
+      try {
+        remoteUrl = await getRepositoryRemoteUrlIpc(tab.repoId);
+        if (remoteUrl && tab.metadata) {
+          get().updateTab(tabId, {
+            metadata: { ...tab.metadata, remote_url: remoteUrl },
+          });
+        }
+      } catch {
+        // optional remote URL query
+      }
+    }
+
+    if (!remoteUrl) return [];
+
+    try {
+      const pullRequests = await fetchRepoPullRequests(remoteUrl);
+      get().updateTab(tabId, { pullRequests });
+      return pullRequests;
+    } catch (err) {
+      console.warn("Failed to fetch pull requests:", err);
+      return [];
     }
   },
 }));

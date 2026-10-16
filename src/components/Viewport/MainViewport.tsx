@@ -193,6 +193,18 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
     }
   }, [searchQuery, filterOnlyMatches]);
 
+  // Scroll to selected commit whenever tab.selectedCommitHash changes (e.g. clicked branch or tag)
+  useEffect(() => {
+    if (tab.selectedCommitHash) {
+      const rowIdx = displayedCommits.findIndex(
+        (c) => c.hash === tab.selectedCommitHash
+      );
+      if (rowIdx !== -1) {
+        setScrollToRowIndex(rowIdx);
+      }
+    }
+  }, [tab.selectedCommitHash, displayedCommits]);
+
   const handleSelectCommit = (hash: string) => {
     updateTab(tab.id, { selectedCommitHash: hash });
   };
@@ -438,6 +450,7 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
                 matchedCommitHashes={searchQuery.trim() ? matchedCommitHashes : undefined}
                 scrollToRowIndex={scrollToRowIndex}
                 isLoading={isLoadingGraph}
+                pullRequests={tab.pullRequests}
               />
             </div>
 

@@ -22,3 +22,17 @@ export interface CloneProgressPayload {
   is_complete: boolean;
   error?: string | null;
 }
+
+export interface PullRequestInfo {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed" | "merged";
+  is_draft: boolean;
+  source_branch: string;
+  target_branch: string;
+  author?: string;
+  author_avatar?: string;
+  updated_at?: string;
+  comments_count?: number;
+}

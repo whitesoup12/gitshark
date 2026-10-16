@@ -602,6 +602,71 @@ pub async fn get_repo_hooks(
 }
 
 #[tauri::command]
+pub async fn execute_hook_dry_run(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    hook_name: String,
+) -> Result<(), String> {
+    let (pty_manager, workdir, hooks_info) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        let repo = session.repo.lock();
+        let hooks_info = git::detect_repo_hooks(&repo)?;
+        (session.pty_manager.clone(), session.path.clone(), hooks_info)
+    };
+
+    let target_hook = hooks_info
+        .active_hooks
+        .into_iter()
+        .find(|h| h.name == hook_name || h.name.starts_with(&hook_name))
+        .ok_or_else(|| format!("Hook '{hook_name}' not found"))?;
+
+    #[cfg(windows)]
+    let (cmd, args) = {
+        if target_hook.path.ends_with(".ps1") {
+            (
+                "powershell".to_string(),
+                vec![
+                    "-NoProfile".to_string(),
+                    "-ExecutionPolicy".to_string(),
+                    "Bypass".to_string(),
+                    "-File".to_string(),
+                    target_hook.path,
+                ],
+            )
+        } else if target_hook.path.ends_with(".cmd") || target_hook.path.ends_with(".bat") {
+            (
+                "cmd.exe".to_string(),
+                vec!["/c".to_string(), target_hook.path],
+            )
+        } else {
+            ("sh".to_string(), vec![target_hook.path])
+        }
+    };
+
+    #[cfg(not(windows))]
+    let (cmd, args) = {
+        (
+            "/bin/sh".to_string(),
+            vec![target_hook.path],
+        )
+    };
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
 pub async fn list_worktrees(
     state: State<'_, AppRepoState>,
     repo_id: String,
@@ -621,7 +686,16 @@ pub async fn list_worktrees(
         .map_err(|e| format!("Failed to run git worktree list: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(git::parse_worktree_porcelain(&stdout))
+    let mut items = git::parse_worktree_porcelain(&stdout);
+
+    // Cross-check with filesystem: if a linked worktree path does not exist, mark it as prunable
+    for item in &mut items {
+        if !item.is_main && !std::path::Path::new(&item.path).exists() {
+            item.is_prunable = true;
+        }
+    }
+
+    Ok(items)
 }
 
 #[tauri::command]
@@ -696,6 +770,33 @@ pub async fn remove_worktree(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git worktree remove failed: {stderr}"));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn prune_worktrees(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (workdir, git_cmd) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.path.clone(), resolve_git_command())
+    };
+
+    let output = create_silent_command(&git_cmd)
+        .args(["worktree", "prune"])
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| format!("Failed to execute git worktree prune: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git worktree prune failed: {stderr}"));
     }
 
     Ok(())
@@ -894,6 +995,33 @@ pub async fn execute_git_fetch(
         30,
         app_handle,
     )
+}
+
+#[tauri::command]
+pub async fn background_fetch_repository(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (workdir, git_cmd) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.path.clone(), resolve_git_command())
+    };
+
+    let output = create_silent_command(&git_cmd)
+        .args(["fetch", "--all", "--prune"])
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| format!("Failed to execute background fetch: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Background fetch failed: {stderr}"));
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1568,6 +1696,64 @@ pub fn save_shark_stats(mut stats: SharkStatsData) -> Result<SharkStatsData, Str
         .map_err(|e| format!("Failed to write shark stats to {}: {e}", stats.storage_path))?;
 
     Ok(stats)
+}
+
+#[tauri::command]
+pub async fn get_git_auth_token(host: Option<String>) -> Result<Option<String>, String> {
+    let target_host = host.unwrap_or_else(|| "github.com".to_string());
+
+    // 1. Check environment variables first
+    if target_host.contains("github") {
+        if let Ok(tok) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
+            let trimmed = tok.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+    } else if target_host.contains("gitlab") {
+        if let Ok(tok) = std::env::var("GITLAB_TOKEN").or_else(|_| std::env::var("GL_TOKEN")) {
+            let trimmed = tok.trim().to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
+        }
+    }
+
+    // 2. Query git credential fill
+    let git_cmd = resolve_git_command();
+    let mut child = match create_silent_command(&git_cmd)
+        .arg("credential")
+        .arg("fill")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let query = format!("protocol=https\nhost={target_host}\n\n");
+        let _ = stdin.write_all(query.as_bytes());
+    }
+
+    if let Ok(output) = child.wait_with_output() {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Some(pwd) = line.strip_prefix("password=") {
+                    let trimmed = pwd.trim().to_string();
+                    if !trimmed.is_empty() {
+                        return Ok(Some(trimmed));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]

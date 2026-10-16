@@ -5,6 +5,7 @@ import { Plus, Terminal as TerminalIcon, Download, Globe, GitPullRequest } from 
 import { SyncButton } from "./SyncButton";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { useSharkStore, computeSharkRank } from "@/store/useSharkStore";
+import { openInBrowserIpc } from "@/lib/ipc";
 
 export const TabBar: React.FC = () => {
   const {
@@ -83,7 +84,7 @@ export const TabBar: React.FC = () => {
       {activeTab && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {/* Ahead/Behind Sync Button */}
-          <SyncButton tab={activeTab} />
+          <SyncButton key={activeTab.id} tab={activeTab} />
 
           {/* Open in Browser Shortcut Button */}
           <button
@@ -95,15 +96,40 @@ export const TabBar: React.FC = () => {
             <span className="hidden md:inline text-[11px]">Browser</span>
           </button>
 
-          {/* Create Pull Request Shortcut Button */}
-          <button
-            onClick={() => createPullRequestInBrowser(activeTab.id)}
-            className="flex items-center gap-1.5 h-7 px-2 rounded text-xs border border-shark-800 text-slate-400 hover:text-emerald-300 hover:border-emerald-800/60 hover:bg-shark-850 transition-colors"
-            title="Create Pull Request in Browser (Ctrl+Shift+P / Cmd+Shift+P)"
-          >
-            <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden md:inline text-[11px]">New PR</span>
-          </button>
+          {/* Create or Open Pull Request Button */}
+          {(() => {
+            const currentBranchName = activeTab.metadata?.current_branch;
+            const activeBranchPr = currentBranchName
+              ? (activeTab.pullRequests || []).find((pr) => pr.source_branch === currentBranchName)
+              : null;
+
+            return (
+              <button
+                onClick={() => {
+                  if (activeBranchPr) {
+                    openInBrowserIpc(activeBranchPr.url);
+                  } else {
+                    createPullRequestInBrowser(activeTab.id);
+                  }
+                }}
+                className={`flex items-center gap-1.5 h-7 px-2 rounded text-xs border transition-colors ${
+                  activeBranchPr
+                    ? "border-emerald-700/60 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 hover:border-emerald-600 shadow-sm"
+                    : "border-shark-800 text-slate-400 hover:text-emerald-300 hover:border-emerald-800/60 hover:bg-shark-850"
+                }`}
+                title={
+                  activeBranchPr
+                    ? `Pull Request #${activeBranchPr.number}: ${activeBranchPr.title}${activeBranchPr.is_draft ? " (Draft)" : ""} — Click to open in browser`
+                    : "Create Pull Request in Browser (Ctrl+Shift+P / Cmd+Shift+P)"
+                }
+              >
+                <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden md:inline text-[11px] font-medium">
+                  {activeBranchPr ? `PR #${activeBranchPr.number}` : "New PR"}
+                </span>
+              </button>
+            );
+          })()}
 
           <button
             onClick={() => toggleTerminal(activeTab.id)}

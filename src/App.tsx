@@ -8,6 +8,7 @@ import { EmptyWorkspace } from "@/components/EmptyState/EmptyWorkspace";
 import { CloneWizardModal } from "@/components/Clone/CloneWizardModal";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { SharkCelebrationOverlay, SharkWisdomModal } from "@/components/common/SharkCompanion";
+import { GlobalDialogHost } from "@/components/common/GlobalDialogHost";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId } = useWorkspaceStore();
@@ -73,6 +74,9 @@ export const App: React.FC = () => {
 
       {/* Swimming Shark & Commit Bubble Celebration Overlay */}
       <SharkCelebrationOverlay />
+
+      {/* Global Dialog Host for styled alerts, confirms, and prompts */}
+      <GlobalDialogHost />
     </div>
   );
 };

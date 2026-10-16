@@ -14,9 +14,13 @@ import {
   ArrowUp,
   ArrowDown,
   Plus,
+  Play,
   Trash2,
   Loader2,
   Settings,
+  GitPullRequest,
+  Layers,
+  AlertTriangle,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -25,9 +29,9 @@ import { StashSection } from "./StashSection";
 import { TagSection } from "./TagSection";
 import { BranchContextMenu } from "./BranchContextMenu";
 import { DeleteBranchModal } from "./DeleteBranchModal";
-import type { BranchItem } from "@/types";
+import type { BranchItem, PullRequestInfo, WorktreeItem } from "@/types";
 import { APP_VERSION } from "@/constants/version";
-import { listenToStatusChanged } from "@/lib/ipc";
+import { listenToStatusChanged, openInBrowserIpc } from "@/lib/ipc";
 
 
 interface SidebarProps {
@@ -47,17 +51,40 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     fetchRemoteSyncStatus,
     fetchBranches,
     createPullRequestInBrowser,
+    executeHookDryRun,
+    setActiveView,
+    updateTab,
+    pruneWorktrees,
+    openRepositoryTab,
   } = useWorkspaceStore();
 
   const openSettings = useSettingsStore((s) => s.openSettings);
 
-  const [sectionsOpen, setSectionsOpen] = useState({
-    branches: true,
-    remotes: true,
-    stashes: true,
-    worktrees: true,
-    tags: false,
-    hooks: true,
+  interface SidebarSectionsState {
+    branches: boolean;
+    remotes: boolean;
+    stashes: boolean;
+    worktrees: boolean;
+    tags: boolean;
+    hooks: boolean;
+  }
+
+  const [sectionsOpen, setSectionsOpen] = useState<SidebarSectionsState>(() => {
+    const defaults: SidebarSectionsState = {
+      branches: true,
+      remotes: false,
+      stashes: false,
+      worktrees: false,
+      tags: false,
+      hooks: false,
+    };
+    try {
+      const saved = localStorage.getItem("gitshark_sidebar_sections_v2");
+      if (saved) {
+        return { ...defaults, ...JSON.parse(saved) };
+      }
+    } catch {}
+    return defaults;
   });
 
   const [isAddingBranch, setIsAddingBranch] = useState(false);
@@ -68,6 +95,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   const [isFetchingRemote, setIsFetchingRemote] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     branch: BranchItem;
+    activePr?: PullRequestInfo | null;
+    linkedWorktree?: WorktreeItem | null;
     x: number;
     y: number;
   } | null>(null);
@@ -145,7 +174,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   }, [tab.repoId, tab.id, fetchBranches, fetchRemoteSyncStatus]);
 
   const toggleSection = (key: keyof typeof sectionsOpen) => {
-    setSectionsOpen((prev) => ({ ...prev, [key]: !prev[key] }));
+    setSectionsOpen((prev) => {
+      const updated = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem("gitshark_sidebar_sections_v2", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
   };
 
   const handleCreateBranch = async (e: React.FormEvent) => {
@@ -215,6 +250,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
 
   const handleCheckoutBranch = async (branch: BranchItem) => {
     await checkoutBranch(tab.id, branch.shorthand);
+  };
+
+  const handleSelectBranchCommit = (branch: BranchItem) => {
+    setActiveView(tab.id, "graph");
+    if (branch.target_commit) {
+      updateTab(tab.id, { selectedCommitHash: branch.target_commit });
+    }
   };
 
   const metadata = tab.metadata;
@@ -401,20 +443,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                   const hasUncommitted = (isCurrent && (metadata?.is_dirty || (metadata?.staged_count ?? 0) + (metadata?.unstaged_count ?? 0) + (metadata?.untracked_count ?? 0) > 0)) || Boolean(branch.has_uncommitted);
                   const aheadCount = isCurrent && tab.remoteSync ? tab.remoteSync.ahead : (branch.ahead ?? 0);
                   const behindCount = isCurrent && tab.remoteSync ? tab.remoteSync.behind : (branch.behind ?? 0);
+                  const activePr = (tab.pullRequests || []).find((pr) => pr.source_branch === branch.shorthand);
+                  const linkedWorktree = (tab.worktrees || []).find((w) => !w.is_main && w.branch === branch.shorthand);
 
                   return (
                     <div
                       key={branch.name}
-                      onClick={() => {
-                        if (!isCurrent) {
-                          checkoutBranch(tab.id, branch.shorthand);
-                        }
-                      }}
+                      onClick={() => handleSelectBranchCommit(branch)}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         setContextMenu({
                           branch,
+                          activePr,
+                          linkedWorktree,
                           x: e.clientX,
                           y: e.clientY,
                         });
@@ -424,7 +466,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                           ? "bg-sky-950/40 text-sky-300 border border-sky-800/40 font-medium"
                           : "text-slate-400 hover:text-slate-200 hover:bg-shark-800/60 border border-transparent"
                       }`}
-                      title={isCurrent ? "Current branch (right-click for actions)" : `Click to checkout '${branch.shorthand}' (right-click for actions)`}
+                      title={isCurrent ? "Current branch (click to view in graph, right-click for actions)" : `Click to view '${branch.shorthand}' in graph (right-click for actions)`}
                     >
                       <div className="flex items-center gap-2 truncate flex-1 mr-2">
                         <span
@@ -441,7 +483,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                         <span className="truncate">{branch.shorthand}</span>
                       </div>
 
-                      {/* Branch Status Indicators: uncommitted, pull (behind), push (ahead) */}
+                      {/* Branch Status Indicators: uncommitted, pull (behind), push (ahead), PR, worktree */}
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {/* 1. Uncommitted working tree changes */}
                         {hasUncommitted && (
@@ -476,6 +518,54 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                           </span>
                         )}
 
+                        {/* 4. Active Pull Request badge */}
+                        {activePr && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openInBrowserIpc(activePr.url);
+                            }}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-medium transition-colors ${
+                              activePr.is_draft
+                                ? "bg-slate-800/80 text-slate-300 border border-slate-700/60 hover:bg-slate-750 hover:text-slate-100"
+                                : "bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-900/80 hover:text-emerald-200"
+                            }`}
+                            title={`Pull Request #${activePr.number}: ${activePr.title}${activePr.is_draft ? " (Draft)" : ""} — Click to open in browser`}
+                          >
+                            <GitPullRequest className="w-2.5 h-2.5" />
+                            <span>#{activePr.number}</span>
+                          </button>
+                        )}
+
+                        {/* 5. Linked Worktree / Orphaned status */}
+                        {linkedWorktree && (
+                          linkedWorktree.is_prunable ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                pruneWorktrees(tab.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-rose-950/80 border border-rose-800/60 text-rose-300 hover:bg-rose-900/80 transition-colors"
+                              title={`Worktree directory '${linkedWorktree.path}' is missing on disk. Click to prune orphaned worktree and unlock branch.`}
+                            >
+                              <AlertTriangle className="w-2.5 h-2.5 text-rose-400" />
+                              <span>orphaned worktree</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRepositoryTab(linkedWorktree.path);
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-slate-800/80 border border-slate-700/60 text-sky-300 hover:bg-slate-750 hover:text-sky-200 transition-colors"
+                              title={`Checked out in worktree at '${linkedWorktree.path}'. Click to open in a new tab.`}
+                            >
+                              <Layers className="w-2.5 h-2.5 text-sky-400" />
+                              <span>worktree</span>
+                            </button>
+                          )
+                        )}
+
                         {/* HEAD badge if current */}
                         {isCurrent && (
                           <span className="text-[10px] text-sky-400/80 font-mono font-semibold">HEAD</span>
@@ -484,9 +574,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                         {/* Non-current checkout & delete actions on hover */}
                         {!isCurrent && (
                           <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 hover:text-sky-300 transition-opacity">
-                              checkout
-                            </span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (linkedWorktree?.is_prunable) {
+                                  pruneWorktrees(tab.id);
+                                } else {
+                                  handleCheckoutBranch(branch);
+                                }
+                              }}
+                              className={`text-[10px] opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded border transition-all font-mono ${
+                                linkedWorktree?.is_prunable
+                                  ? "text-rose-400 hover:text-rose-300 hover:bg-rose-950/70 border-rose-800/50"
+                                  : "text-slate-400 hover:text-sky-300 hover:bg-sky-950/70 border-transparent hover:border-sky-800/50"
+                              }`}
+                              title={
+                                linkedWorktree?.is_prunable
+                                  ? `Branch locked by orphaned worktree at '${linkedWorktree.path}'. Click to prune and unlock.`
+                                  : `Checkout branch '${branch.shorthand}'`
+                              }
+                            >
+                              {linkedWorktree?.is_prunable ? "prune & unlock" : "checkout"}
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -577,7 +686,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                   remoteBranches.map((branch) => (
                     <div
                       key={branch.name}
-                      onClick={() => checkoutBranch(tab.id, branch.shorthand)}
+                      onClick={() => handleSelectBranchCommit(branch)}
                       onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -588,13 +697,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                         });
                       }}
                       className="group flex items-center justify-between px-2 py-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800/60 cursor-pointer transition-colors"
-                      title={`Click to checkout local branch from '${branch.shorthand}' (right-click for actions)`}
+                      title={`Click to view '${branch.shorthand}' in graph (right-click for actions)`}
                     >
                       <div className="flex items-center gap-2 truncate">
                         <Globe className="w-3 h-3 text-indigo-400 flex-shrink-0" />
                         <span className="truncate">{branch.shorthand}</span>
                       </div>
                       <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCheckoutBranch(branch);
+                          }}
+                          className="text-[10px] text-slate-400 hover:text-indigo-300 hover:bg-indigo-950/70 px-1 py-0.5 rounded border border-transparent hover:border-indigo-800/50 transition-colors font-mono"
+                          title={`Checkout local branch from '${branch.shorthand}'`}
+                        >
+                          checkout
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -605,9 +724,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
-                        <span className="text-[10px] text-slate-500 hover:text-indigo-300">
-                          checkout
-                        </span>
                       </div>
                     </div>
                   ))
@@ -663,13 +779,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                   {tab.hooksInfo.active_hooks.map((h) => (
                     <div
                       key={h.name}
-                      className="flex items-center justify-between px-2 py-1 rounded text-[11px] bg-shark-850/80 border border-shark-750/60"
+                      className="group flex items-center justify-between px-2 py-1 rounded text-[11px] bg-shark-850/80 border border-shark-750/60 hover:border-shark-700 transition-colors"
                       title={h.path}
                     >
-                      <span className="font-mono text-slate-200">{h.name}</span>
-                      <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono">
-                        active
-                      </span>
+                      <div className="flex items-center gap-1.5 truncate mr-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                        <span className="font-mono text-slate-200 truncate">{h.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => executeHookDryRun(tab.id, h.name)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-sky-950/80 hover:bg-sky-900 border border-sky-800/60 hover:border-sky-700 text-sky-300 font-mono transition-colors shadow-sm"
+                          title={`Dry-run '${h.name}' hook directly in terminal`}
+                        >
+                          <Play className="w-2.5 h-2.5 fill-current" />
+                          <span>Dry Run</span>
+                        </button>
+                        <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono">
+                          active
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -726,7 +855,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
             setSectionsOpen((prev) => ({ ...prev, branches: true }));
           }}
           onDelete={(b) => promptDeleteBranch(b.shorthand, b.is_remote)}
-          onOpenPr={(b) => createPullRequestInBrowser(tab.id, b.shorthand)}
+          activePr={contextMenu.activePr}
+          onOpenPr={(b) => {
+            if (contextMenu.activePr) {
+              openInBrowserIpc(contextMenu.activePr.url);
+            } else {
+              createPullRequestInBrowser(tab.id, b.shorthand);
+            }
+          }}
+          linkedWorktree={contextMenu.linkedWorktree}
+          onPruneWorktrees={() => pruneWorktrees(tab.id)}
+          onOpenWorktreeTab={(path) => openRepositoryTab(path)}
         />
       )}
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Tab, WorktreeItem } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { showConfirm } from "@/store/useDialogStore";
 import { pickRepositoryDirectory } from "@/lib/ipc";
 import {
   Layers,
@@ -15,6 +16,7 @@ import {
   Copy,
   Check,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 
 interface WorktreeSectionProps {
@@ -34,8 +36,10 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
   isOpen,
   onToggle,
 }) => {
-  const { openRepositoryTab, addWorktree, removeWorktree, fetchWorktrees } =
+  const { openRepositoryTab, addWorktree, removeWorktree, pruneWorktrees, fetchWorktrees } =
     useWorkspaceStore();
+
+  const [isPruning, setIsPruning] = useState(false);
 
   const [isAdding, setIsAdding] = useState(false);
   const [newPath, setNewPath] = useState("");
@@ -92,7 +96,14 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
 
   const handleRemoveWorktree = async (w: WorktreeItem, force = false) => {
     if (w.is_main) return;
-    if (window.confirm(`Are you sure you want to remove worktree at "${w.path}"?`)) {
+    const confirmed = await showConfirm({
+      title: "Remove Worktree",
+      message: `Are you sure you want to remove the worktree at:\n"${w.path}"?`,
+      confirmText: "Remove Worktree",
+      variant: "danger",
+    });
+
+    if (confirmed) {
       await removeWorktree(tab.id, w.path, force);
     }
   };
@@ -105,6 +116,18 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
     navigator.clipboard.writeText(path);
     setCopiedPath(true);
     setTimeout(() => setCopiedPath(false), 1500);
+  };
+
+  const hasPrunable = worktrees.some((w) => w.is_prunable);
+
+  const handlePrune = async () => {
+    if (isPruning) return;
+    setIsPruning(true);
+    try {
+      await pruneWorktrees(tab.id);
+    } finally {
+      setIsPruning(false);
+    }
   };
 
   return (
@@ -126,17 +149,38 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
           </span>
         </button>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!isOpen) onToggle();
-            setIsAdding((prev) => !prev);
-          }}
-          className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
-          title="Add Linked Worktree"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {hasPrunable && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrune();
+              }}
+              disabled={isPruning}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-950/70 border border-rose-800/60 text-rose-300 hover:bg-rose-900/70 transition-colors"
+              title="Prune orphaned worktrees whose folders have been deleted on disk"
+            >
+              {isPruning ? (
+                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              ) : (
+                <AlertTriangle className="w-2.5 h-2.5 text-rose-400" />
+              )}
+              <span>Prune</span>
+            </button>
+          )}
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isOpen) onToggle();
+              setIsAdding((prev) => !prev);
+            }}
+            className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
+            title="Add Linked Worktree"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Worktree Items List */}
@@ -270,6 +314,16 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
                         </span>
                       )}
 
+                      {w.is_prunable && (
+                        <span
+                          className="flex items-center gap-0.5 text-[9px] px-1 py-0.2 rounded bg-rose-950/80 border border-rose-800/80 text-rose-300 font-mono"
+                          title="Worktree directory missing on disk (orphaned). Pruning will free up this branch."
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5 text-rose-400" />
+                          orphaned
+                        </span>
+                      )}
+
                       {w.is_locked && (
                         <span
                           className="text-[9px] text-amber-400"
@@ -281,31 +335,50 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
                     </div>
 
                     <div
-                      className="text-[10px] text-slate-500 font-mono truncate pl-4.5"
-                      title={w.path}
+                      className={`text-[10px] font-mono truncate pl-4.5 ${
+                        w.is_prunable ? "text-rose-400/80 line-through" : "text-slate-500"
+                      }`}
+                      title={w.is_prunable ? `${w.path} (missing on disk)` : w.path}
                     >
-                      {dirName}
+                      {dirName} {w.is_prunable && <span className="no-underline text-rose-300 ml-1">(missing)</span>}
                     </div>
                   </div>
 
                   {/* Right Actions on Hover */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleOpenInNewTab(w)}
-                      className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
-                      title="Open Worktree in New Tab"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                    </button>
-
-                    {!w.is_main && (
+                    {w.is_prunable ? (
                       <button
-                        onClick={() => handleRemoveWorktree(w)}
-                        className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-800 transition-colors"
-                        title="Remove Worktree"
+                        onClick={handlePrune}
+                        disabled={isPruning}
+                        className="p-1 rounded text-rose-400 hover:text-rose-300 hover:bg-rose-950/60 transition-colors"
+                        title="Prune orphaned worktree (git worktree prune)"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        {isPruning ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <AlertTriangle className="w-3 h-3" />
+                        )}
                       </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => handleOpenInNewTab(w)}
+                          className="p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
+                          title="Open Worktree in New Tab"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
+
+                        {!w.is_main && (
+                          <button
+                            onClick={() => handleRemoveWorktree(w)}
+                            className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-800 transition-colors"
+                            title="Remove Worktree"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -319,19 +392,33 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
       {contextMenu && (
         <div
           style={{ top: contextMenu.y, left: contextMenu.x }}
-          className="fixed z-50 w-44 bg-shark-900 border border-shark-750 rounded-lg shadow-xl py-1 text-xs text-slate-200 select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+          className="fixed z-50 w-52 bg-shark-900 border border-shark-750 rounded-lg shadow-xl py-1 text-xs text-slate-200 select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            onClick={() => {
-              handleOpenInNewTab(contextMenu.worktree);
-              setContextMenu(null);
-            }}
-            className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 transition-colors text-left"
-          >
-            <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
-            <span>Open in New Tab</span>
-          </button>
+          {contextMenu.worktree.is_prunable ? (
+            <button
+              onClick={() => {
+                handlePrune();
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-rose-950/40 text-rose-300 transition-colors text-left"
+              title="Prune missing worktree and unlock branch"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+              <span>Prune Orphaned Worktree</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                handleOpenInNewTab(contextMenu.worktree);
+                setContextMenu(null);
+              }}
+              className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 transition-colors text-left"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+              <span>Open in New Tab</span>
+            </button>
+          )}
 
           <button
             onClick={() => {
@@ -348,7 +435,7 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
             <span>Copy Worktree Path</span>
           </button>
 
-          {!contextMenu.worktree.is_main && (
+          {!contextMenu.worktree.is_main && !contextMenu.worktree.is_prunable && (
             <>
               <div className="h-[1px] bg-shark-800 my-1" />
               <button
