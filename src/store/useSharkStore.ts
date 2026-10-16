@@ -16,9 +16,9 @@ export interface SharkStats {
   storagePath: string;
 }
 
-export const XP_PER_COMMIT = 5;
-export const XP_PER_PUSH = 10;
-export const XP_PER_MAIN_MERGE = 20;
+export const XP_PER_COMMIT = 1;
+export const XP_PER_PUSH = 5;
+export const XP_PER_MAIN_MERGE = 10;
 
 export interface SharkRankInfo {
   level: number;

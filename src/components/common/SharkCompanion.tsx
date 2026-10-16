@@ -506,33 +506,33 @@ export const SharkWisdomModal: React.FC = () => {
           <div className="grid grid-cols-4 gap-1.5 pt-0.5 text-center">
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
-              title="Commits created (+5 XP each)"
+              title="Commits created (+1 XP each)"
             >
               <div className="text-xs font-bold font-mono text-sky-300">
                 {stats.commitsSwum}
               </div>
               <div className="text-[9px] text-slate-400 truncate">Commits</div>
-              <div className="text-[8px] font-mono text-sky-400/80">+5 XP</div>
+              <div className="text-[8px] font-mono text-sky-400/80">+1 XP</div>
             </div>
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
-              title="Pushes to remote (+10 XP each)"
+              title="Pushes to remote (+5 XP each)"
             >
               <div className="text-xs font-bold font-mono text-emerald-300">
                 {stats.pushesLaunched}
               </div>
               <div className="text-[9px] text-slate-400 truncate">Pushes</div>
-              <div className="text-[8px] font-mono text-emerald-400/80">+10 XP</div>
+              <div className="text-[8px] font-mono text-emerald-400/80">+5 XP</div>
             </div>
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
-              title="Branches merged into main/master (+20 XP each)"
+              title="Branches merged into main/master (+10 XP each)"
             >
               <div className="text-xs font-bold font-mono text-purple-300">
                 {stats.mergesToMain || 0}
               </div>
               <div className="text-[9px] text-slate-400 truncate">To Main</div>
-              <div className="text-[8px] font-mono text-purple-400/80">+20 XP</div>
+              <div className="text-[8px] font-mono text-purple-400/80">+10 XP</div>
             </div>
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"

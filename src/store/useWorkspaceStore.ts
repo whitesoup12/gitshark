@@ -487,7 +487,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
             await get().refreshTabMetadata(tabId);
             useSharkStore.getState().recordSharkStat("commit", 1);
-            useSharkStore.getState().triggerCelebration("swim", "Commit Chomped! (+5 XP) 🦈");
+            useSharkStore.getState().triggerCelebration("swim", "Commit Chomped! (+1 XP) 🦈");
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -621,7 +621,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
             await get().refreshTabMetadata(tabId);
             useSharkStore.getState().recordSharkStat("push", 1);
-            useSharkStore.getState().triggerCelebration("swim", "Pushed to Remote Seas! (+10 XP) 🌊");
+            useSharkStore.getState().triggerCelebration("swim", "Pushed to Remote Seas! (+5 XP) 🌊");
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -814,7 +814,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                   .getState()
                   .triggerCelebration(
                     "swim",
-                    `Branch landed on ${targetBranch}! (+${mergesCount * 20} XP) 🌊`
+                    `Branch landed on ${targetBranch}! (+${mergesCount * 10} XP) 🌊`
                   );
               }
             }
@@ -1063,7 +1063,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
             await get().refreshTabMetadata(tabId);
 
-            // Award +20 XP when a branch is merged into main or master
+            // Award +10 XP when a branch is merged into main or master
             const isMergingIntoMain =
               (currentBranch === "main" || currentBranch === "master") &&
               branch.toLowerCase() !== currentBranch &&
@@ -1075,7 +1075,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                 .getState()
                 .triggerCelebration(
                   "swim",
-                  `Branch '${branch}' merged into ${currentBranch}! (+20 XP) 🦈`
+                  `Branch '${branch}' merged into ${currentBranch}! (+10 XP) 🦈`
                 );
             }
 
