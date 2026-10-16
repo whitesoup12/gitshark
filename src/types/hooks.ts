@@ -7,7 +7,8 @@ export type HookStage =
   | "post-commit"
   | "pre-push"
   | "committing"
-  | "pushing";
+  | "pushing"
+  | (string & {});
 
 export interface HookDetail {
   name: string;
@@ -27,7 +28,8 @@ export interface HookExecutionState {
   stage: HookStage;
   status: HookStatus;
   elapsedSeconds: number;
-  lastCommand: "commit" | "push" | "pull" | "merge" | null;
+  lastCommand: "commit" | "push" | "pull" | "merge" | "dry-run" | "fetch" | null;
+  lastHookName?: string;
   lastMessage?: string;
   lastAmend?: boolean;
   exitCode?: number | null;

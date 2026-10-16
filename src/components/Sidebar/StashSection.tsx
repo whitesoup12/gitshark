@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Tab, StashItem } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { showConfirm } from "@/store/useDialogStore";
 import {
   Archive,
   ChevronDown,
@@ -68,11 +69,14 @@ export const StashSection: React.FC<StashSectionProps> = ({
   };
 
   const handleDrop = async (stash: StashItem) => {
-    if (
-      window.confirm(
-        `Are you sure you want to drop stash@{${stash.index}}?\n"${stash.message}"`
-      )
-    ) {
+    const confirmed = await showConfirm({
+      title: "Drop Stash",
+      message: `Are you sure you want to drop stash@{${stash.index}}?\n"${stash.message}"\n\nThis action permanently deletes the stashed changes.`,
+      confirmText: "Drop Stash",
+      variant: "danger",
+    });
+
+    if (confirmed) {
       setActiveActionIndex(stash.index);
       try {
         await dropStash(tab.id, stash.index);

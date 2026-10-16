@@ -16,6 +16,7 @@ import type {
   GitTagItem,
   GitBinaryInfo,
 } from "@/types";
+import { showPrompt } from "@/store/useDialogStore";
 
 export const isTauriEnvironment = (): boolean => {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -38,7 +39,12 @@ export async function pickRepositoryDirectory(): Promise<string | null> {
     return selected;
   } catch (err) {
     if (!isTauriEnvironment()) {
-      const promptPath = window.prompt("Enter absolute path to Git repository folder:");
+      const promptPath = await showPrompt({
+        title: "Open Repository",
+        message: "Enter absolute path to Git repository folder:",
+        placeholder: "/path/to/repository",
+        confirmText: "Open",
+      });
       return promptPath && promptPath.trim().length > 0 ? promptPath.trim() : null;
     }
     console.error("Failed to open native file explorer dialog:", err);
@@ -538,6 +544,17 @@ export async function executeGitMergeIpc(
 }
 
 /**
+ * Silently fetch all remotes and prune in background
+ */
+export async function backgroundFetchRepositoryIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] background_fetch_repository for ${repoId}`);
+    return;
+  }
+  return await invoke<void>("background_fetch_repository", { repoId });
+}
+
+/**
  * Send SIGINT/kill to active PTY child process (e.g. aborting long-running hook)
  */
 export async function cancelActiveProcessIpc(repoId: string): Promise<void> {
@@ -568,6 +585,17 @@ export async function getRepoHooksIpc(repoId: string): Promise<RepoHooksInfo> {
     };
   }
   return await invoke<RepoHooksInfo>("get_repo_hooks", { repoId });
+}
+
+/**
+ * Execute a dry-run of a specific git hook in the PTY terminal
+ */
+export async function executeHookDryRunIpc(repoId: string, hookName: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] execute_hook_dry_run: ${hookName} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("execute_hook_dry_run", { repoId, hookName });
 }
 
 /**
@@ -639,6 +667,17 @@ export async function removeWorktreeIpc(
     path,
     force,
   });
+}
+
+/**
+ * Prune stale / orphaned worktree administrative data (git worktree prune)
+ */
+export async function pruneWorktreesIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] prune_worktrees for ${repoId}`);
+    return;
+  }
+  return await invoke<void>("prune_worktrees", { repoId });
 }
 
 /**
@@ -1212,5 +1251,16 @@ export async function saveSharkStatsIpc(
   }
   return await invoke<SharkStatsData>("save_shark_stats", { stats });
 }
+
+/**
+ * Retrieve Git credentials / token for remote host (e.g. github.com)
+ */
+export async function getGitAuthTokenIpc(host?: string): Promise<string | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+  return await invoke<string | null>("get_git_auth_token", { host });
+}
+
 
 

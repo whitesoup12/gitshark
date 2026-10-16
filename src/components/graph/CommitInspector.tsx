@@ -21,8 +21,9 @@ import {
   Undo2,
 } from "lucide-react";
 import { formatShortHash } from "@/lib/utils";
-import { getCommitDetailsIpc, getCommitFileDiffIpc } from "@/lib/ipc";
+import { getCommitDetailsIpc, getCommitFileDiffIpc, openInBrowserIpc } from "@/lib/ipc";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { showConfirm } from "@/store/useDialogStore";
 
 interface CommitInspectorProps {
   repoId: string;
@@ -37,8 +38,9 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
   onClose,
   onSelectCommit,
 }) => {
-  const { activeTabId, createTag, deleteTag, pushTag, executeCherryPick, executeRevert } =
+  const { tabs, activeTabId, createTag, deleteTag, pushTag, executeCherryPick, executeRevert } =
     useWorkspaceStore();
+  const currentTab = tabs.find((t) => t.id === activeTabId);
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [details, setDetails] = useState<CommitDetails | null>(null);
@@ -245,7 +247,14 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
 
   const handleDeleteTag = async (name: string) => {
     if (!activeTabId) return;
-    if (window.confirm(`Are you sure you want to delete tag '${name}'?`)) {
+    const confirmed = await showConfirm({
+      title: "Delete Tag",
+      message: `Are you sure you want to delete tag "${name}"? This action cannot be undone.`,
+      confirmText: "Delete Tag",
+      variant: "danger",
+    });
+
+    if (confirmed) {
       await deleteTag(activeTabId, name);
     }
   };
@@ -478,6 +487,10 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
             <div className="flex flex-wrap items-center gap-1.5">
               {commit.refs.map((r) => {
                 const isTag = r.kind === "tag";
+                const activePr = !isTag
+                  ? (currentTab?.pullRequests || []).find((p) => p.source_branch === r.shorthand)
+                  : null;
+
                 return (
                   <span
                     key={r.name}
@@ -489,6 +502,23 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
                   >
                     {isTag && <Bookmark className="w-2.5 h-2.5 text-amber-400" />}
                     <span>{r.shorthand}</span>
+                    {activePr && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openInBrowserIpc(activePr.url);
+                        }}
+                        className={`inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[9px] font-mono font-medium transition-colors ml-0.5 ${
+                          activePr.is_draft
+                            ? "bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-750 hover:text-slate-100"
+                            : "bg-emerald-950 text-emerald-300 border border-emerald-700 hover:bg-emerald-900 hover:text-emerald-100"
+                        }`}
+                        title={`Pull Request #${activePr.number}: ${activePr.title}${activePr.is_draft ? " (Draft)" : ""} — Click to open in browser`}
+                      >
+                        <GitPullRequest className="w-2.5 h-2.5" />
+                        <span>#{activePr.number}</span>
+                      </button>
+                    )}
                     {isTag && (
                       <span className="flex items-center gap-0.5 opacity-0 group-hover/ref:opacity-100 transition-opacity ml-1">
                         <button

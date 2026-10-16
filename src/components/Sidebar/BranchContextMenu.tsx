@@ -12,6 +12,8 @@ import {
   Trash2,
   Globe,
   GitPullRequest,
+  Layers,
+  AlertTriangle,
 } from "lucide-react";
 
 export interface BranchContextMenuProps {
@@ -27,6 +29,10 @@ export interface BranchContextMenuProps {
   onCreateBranchFrom: (branch: BranchItem) => void;
   onDelete: (branch: BranchItem) => void;
   onOpenPr?: (branch: BranchItem) => void;
+  activePr?: import("@/types").PullRequestInfo | null;
+  linkedWorktree?: import("@/types").WorktreeItem | null;
+  onPruneWorktrees?: () => void;
+  onOpenWorktreeTab?: (path: string) => void;
 }
 
 export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
@@ -42,6 +48,10 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
   onCreateBranchFrom,
   onDelete,
   onOpenPr,
+  activePr,
+  linkedWorktree,
+  onPruneWorktrees,
+  onOpenWorktreeTab,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState(position);
@@ -160,6 +170,44 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
           {isCurrent && <span className="text-[10px] text-slate-500 italic">current</span>}
         </button>
 
+        {/* Linked Worktree / Prune Actions */}
+        {linkedWorktree && (
+          linkedWorktree.is_prunable ? (
+            <button
+              onClick={() => {
+                if (onPruneWorktrees) {
+                  onPruneWorktrees();
+                }
+                onClose();
+              }}
+              className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-rose-950/40 text-rose-300 cursor-pointer transition-colors text-left"
+              title="Worktree directory missing on disk. Prune to unlock this branch for checkout."
+            >
+              <div className="flex items-center gap-2 truncate flex-1 mr-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+                <span className="truncate">Prune Orphaned Worktree</span>
+              </div>
+              <span className="text-[10px] text-rose-400/80 font-mono flex-shrink-0">unlock</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (onOpenWorktreeTab) {
+                  onOpenWorktreeTab(linkedWorktree.path);
+                }
+                onClose();
+              }}
+              className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-sky-200 cursor-pointer transition-colors text-left"
+              title={`Open worktree at '${linkedWorktree.path}' in a new tab`}
+            >
+              <div className="flex items-center gap-2 truncate flex-1 mr-1">
+                <Layers className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                <span className="truncate">Open Worktree Tab</span>
+              </div>
+            </button>
+          )
+        )}
+
         {/* Pull */}
         <button
           onClick={() => {
@@ -249,8 +297,27 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
           <span>New Branch From Here...</span>
         </button>
 
-        {/* Create Pull Request in Browser */}
-        {onOpenPr && (
+        {/* View / Create Pull Request in Browser */}
+        {activePr ? (
+          <button
+            onClick={() => {
+              if (onOpenPr) {
+                onOpenPr(branch);
+              }
+              onClose();
+            }}
+            className="flex items-center justify-between w-full px-3 py-1.5 hover:bg-emerald-600/20 hover:text-emerald-300 text-emerald-300 cursor-pointer transition-colors text-left"
+            title={`View Pull Request #${activePr.number}: ${activePr.title}${activePr.is_draft ? " (Draft)" : ""} in browser`}
+          >
+            <div className="flex items-center gap-2 truncate flex-1 mr-1">
+              <GitPullRequest className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+              <span className="truncate">View PR #{activePr.number} in Browser</span>
+            </div>
+            {activePr.is_draft && (
+              <span className="text-[10px] bg-slate-800 text-slate-400 px-1 py-0.2 rounded font-mono">draft</span>
+            )}
+          </button>
+        ) : onOpenPr ? (
           <button
             onClick={() => {
               onOpenPr(branch);
@@ -262,7 +329,7 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
             <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
             <span>Create Pull Request...</span>
           </button>
-        )}
+        ) : null}
 
         {/* Copy Branch Name */}
         <button

@@ -58,12 +58,15 @@ pub fn run() {
             commands::execute_git_push,
             commands::execute_git_pull,
             commands::execute_git_fetch,
+            commands::background_fetch_repository,
             commands::execute_git_merge,
             commands::cancel_active_process,
             commands::get_repo_hooks,
+            commands::execute_hook_dry_run,
             commands::list_worktrees,
             commands::add_worktree,
             commands::remove_worktree,
+            commands::prune_worktrees,
             commands::get_remote_sync_status,
             commands::start_clone_repository,
             commands::cancel_clone,
@@ -94,6 +97,7 @@ pub fn run() {
             commands::reset_to_commit,
             commands::get_shark_stats,
             commands::save_shark_stats,
+            commands::get_git_auth_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

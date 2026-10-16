@@ -71,6 +71,21 @@ impl PtyManager {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
+        // Ensure development tooling paths (Homebrew, Node, Cargo) are always available in GUI PTY
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let mut extra_paths = vec![
+            "/opt/homebrew/bin".to_string(),
+            "/opt/homebrew/sbin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/local/sbin".to_string(),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            extra_paths.push(format!("{home}/.cargo/bin"));
+            extra_paths.push(format!("{home}/.local/bin"));
+        }
+        let augmented_path = format!("{}:{current_path}", extra_paths.join(":"));
+        cmd.env("PATH", augmented_path);
+
         let child = pair
             .slave
             .spawn_command(cmd)

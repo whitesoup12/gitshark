@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { Tab } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { showConfirm } from "@/store/useDialogStore";
 import {
   Bookmark,
   ChevronDown,
@@ -85,7 +86,14 @@ export const TagSection: React.FC<TagSectionProps> = ({
   };
 
   const handleDeleteTag = async (name: string) => {
-    if (window.confirm(`Are you sure you want to delete tag '${name}'?`)) {
+    const confirmed = await showConfirm({
+      title: "Delete Tag",
+      message: `Are you sure you want to delete tag "${name}"? This action cannot be undone.`,
+      confirmText: "Delete Tag",
+      variant: "danger",
+    });
+
+    if (confirmed) {
       await deleteTag(tab.id, name);
     }
   };

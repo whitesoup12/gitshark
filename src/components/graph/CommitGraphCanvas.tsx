@@ -18,6 +18,7 @@ interface CommitGraphCanvasProps {
   matchedCommitHashes?: Set<string>;
   scrollToRowIndex?: number | null;
   isLoading?: boolean;
+  pullRequests?: import("@/types").PullRequestInfo[];
 }
 
 export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
@@ -28,6 +29,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
   matchedCommitHashes,
   scrollToRowIndex = null,
   isLoading = false,
+  pullRequests,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -302,11 +304,13 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
         ctx.font = "600 10.5px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
         for (const badge of commit.refs) {
+          const pr = pullRequests?.find((p) => p.source_branch === badge.shorthand);
           const badgeTheme =
             REF_COLORS[badge.kind as keyof typeof REF_COLORS] ??
             REF_COLORS.local_branch;
 
-          const textMetrics = ctx.measureText(badge.shorthand);
+          const displayText = pr ? `${badge.shorthand} #${pr.number}` : badge.shorthand;
+          const textMetrics = ctx.measureText(displayText);
           const badgeWidth = textMetrics.width + 14;
           const badgeHeight = 18;
           const badgeY = y + (ROW_HEIGHT - badgeHeight) / 2;
@@ -316,13 +320,13 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
           drawRoundedRect(ctx, currentX, badgeY, badgeWidth, badgeHeight, 4);
           ctx.fillStyle = badgeTheme.bg;
           ctx.fill();
-          ctx.strokeStyle = badgeTheme.border;
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = pr ? "#10b981" : badgeTheme.border;
+          ctx.lineWidth = pr ? 1.5 : 1;
           ctx.stroke();
 
           // Badge Text
-          ctx.fillStyle = badgeTheme.text;
-          ctx.fillText(badge.shorthand, currentX + 7, badgeY + 12.5);
+          ctx.fillStyle = pr ? "#6ee7b7" : badgeTheme.text;
+          ctx.fillText(displayText, currentX + 7, badgeY + 12.5);
           ctx.restore();
 
           currentX += badgeWidth + 5;

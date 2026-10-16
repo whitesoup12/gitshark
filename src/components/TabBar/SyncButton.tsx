@@ -24,9 +24,19 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
   const behind = sync?.behind ?? 0;
   const hasUpstream = sync?.has_upstream ?? false;
 
+  const isHookPushing = tab.hookState?.status === "running" && tab.hookState?.lastCommand === "push";
+  const isHookPulling = tab.hookState?.status === "running" && tab.hookState?.lastCommand === "pull";
+  const isHookFetching = tab.hookState?.status === "running" && tab.hookState?.lastCommand === "fetch";
+  const isHookRunning = tab.hookState?.status === "running";
+
+  const effectivePushing = isPushing || isHookPushing;
+  const effectivePulling = isPulling || isHookPulling;
+  const effectiveFetching = isFetching || isHookFetching;
+  const isBusy = effectivePulling || effectivePushing || effectiveFetching || isHookRunning;
+
   const handlePull = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!tab.repoId || isPulling || isPushing) return;
+    if (!tab.repoId || isBusy) return;
     setIsPulling(true);
     try {
       await executePull(tab.id);
@@ -42,7 +52,7 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
 
   const handlePush = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!tab.repoId || isPulling || isPushing) return;
+    if (!tab.repoId || isBusy) return;
     setIsPushing(true);
     try {
       await executePush(tab.id, undefined, undefined, false, !hasUpstream);
@@ -58,7 +68,7 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
 
   const handleFetch = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!tab.repoId || isFetching) return;
+    if (!tab.repoId || isBusy) return;
     setIsFetching(true);
     try {
       await executeFetch(tab.id, undefined, true);
@@ -76,17 +86,15 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
     return (
       <button
         onClick={handlePush}
-        disabled={isPushing}
-        className="flex items-center gap-1.5 h-7 px-2.5 rounded text-xs transition-colors border border-sky-800/60 bg-sky-950/60 hover:bg-sky-900/60 text-sky-200"
+        disabled={isBusy}
+        className="flex items-center gap-1.5 h-7 px-2.5 rounded text-xs transition-colors border border-sky-800/60 bg-sky-950/60 hover:bg-sky-900/60 text-sky-200 disabled:opacity-50"
         title="Publish current branch to remote (git push --set-upstream)"
       >
-        <Cloud className={`w-3.5 h-3.5 text-sky-400 ${isPushing ? "animate-pulse" : ""}`} />
-        <span className="text-[11px] font-medium">{isPushing ? "Publishing..." : "Publish Branch"}</span>
+        <Cloud className={`w-3.5 h-3.5 text-sky-400 ${effectivePushing ? "animate-pulse" : ""}`} />
+        <span className="text-[11px] font-medium">{effectivePushing ? "Publishing..." : "Publish Branch"}</span>
       </button>
     );
   }
-
-  const isBusy = isPulling || isPushing || isFetching;
 
   return (
     <div className="flex items-center rounded border border-shark-800 bg-shark-900/80 p-0.5 gap-1">
@@ -105,7 +113,7 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
             : "Pull changes from remote (git pull)"
         }
       >
-        <ArrowDown className={`w-3 h-3 text-indigo-400 ${isPulling ? "animate-bounce" : ""}`} />
+        <ArrowDown className={`w-3 h-3 text-indigo-400 ${effectivePulling ? "animate-bounce" : ""}`} />
         <span>Pull</span>
         {behind > 0 && (
           <span className="ml-0.5 px-1 py-0.2 rounded-full text-[10px] bg-indigo-500/30 text-indigo-200 font-mono">
@@ -129,7 +137,7 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
             : "Push local commits to remote (git push)"
         }
       >
-        <ArrowUp className={`w-3 h-3 text-sky-400 ${isPushing ? "animate-bounce" : ""}`} />
+        <ArrowUp className={`w-3 h-3 text-sky-400 ${effectivePushing ? "animate-bounce" : ""}`} />
         <span>Push</span>
         {ahead > 0 && (
           <span className="ml-0.5 px-1 py-0.2 rounded-full text-[10px] bg-sky-500/30 text-sky-200 font-mono">
@@ -142,11 +150,11 @@ export const SyncButton: React.FC<SyncButtonProps> = ({ tab }) => {
       <button
         onClick={handleFetch}
         disabled={isBusy}
-        className="flex items-center gap-1 h-6 px-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800 transition-colors text-[11px]"
+        className="flex items-center gap-1 h-6 px-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800 transition-colors text-[11px] disabled:opacity-50"
         title="Refresh remote status (fetch)"
       >
-        <RefreshCw className={`w-3 h-3 ${isFetching || isPulling || isPushing ? "animate-spin text-sky-400" : ""}`} />
-        {!ahead && !behind && (
+        <RefreshCw className={`w-3 h-3 ${effectiveFetching || effectivePulling || effectivePushing ? "animate-spin text-sky-400" : ""}`} />
+        {!ahead && !behind && !effectivePushing && !effectivePulling && !effectiveFetching && (
           <span className="text-emerald-400 text-[10px] font-medium hidden md:inline-flex items-center gap-0.5">
             <Check className="w-2.5 h-2.5" />
             <span>Synced</span>
