@@ -1661,6 +1661,8 @@ pub struct SharkStatsData {
     #[serde(default)]
     pub merges_to_main: u64,
     #[serde(default)]
+    pub prs_opened: u64,
+    #[serde(default)]
     pub storage_path: String,
 }
 
@@ -1692,6 +1694,7 @@ pub fn get_shark_stats() -> Result<SharkStatsData, String> {
         pushes_launched: 0,
         stashes_buried: 0,
         merges_to_main: 0,
+        prs_opened: 0,
         storage_path: path_str,
     })
 }
@@ -1771,6 +1774,46 @@ pub async fn get_git_auth_token(host: Option<String>) -> Result<Option<String>, 
     Ok(None)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DevFolderItem {
+    pub name: String,
+    pub path: String,
+    pub is_git_repo: bool,
+}
+
+#[tauri::command]
+pub fn list_dev_folders(dir_path: String) -> Result<Vec<DevFolderItem>, String> {
+    let p = std::path::Path::new(&dir_path);
+    if !p.exists() || !p.is_dir() {
+        return Err(format!("Directory '{dir_path}' does not exist or is not a directory"));
+    }
+
+    let mut folders = Vec::new();
+    let entries = std::fs::read_dir(p)
+        .map_err(|e| format!("Failed to read directory '{dir_path}': {e}"))?;
+
+    for entry in entries.flatten() {
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_dir() {
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.starts_with('.') || file_name == "node_modules" || file_name == "target" || file_name == "dist" {
+                    continue;
+                }
+                let full_path = entry.path().to_string_lossy().to_string();
+                let is_git_repo = entry.path().join(".git").exists();
+                folders.push(DevFolderItem {
+                    name: file_name,
+                    path: full_path,
+                    is_git_repo,
+                });
+            }
+        }
+    }
+
+    folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(folders)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1797,6 +1840,31 @@ mod tests {
         let path = resolve_shark_stats_path();
         assert!(path.to_string_lossy().contains(".gitshark"));
         assert!(path.to_string_lossy().ends_with("shark_stats.json"));
+    }
+
+    #[test]
+    fn test_list_dev_folders() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_devdir_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+
+        let sub_repo = test_dir.join("repo-a");
+        let _ = std::fs::create_dir_all(&sub_repo);
+        let _ = git2::Repository::init(&sub_repo);
+
+        let sub_folder = test_dir.join("folder-b");
+        let _ = std::fs::create_dir_all(&sub_folder);
+
+        let ignored_folder = test_dir.join(".hidden");
+        let _ = std::fs::create_dir_all(&ignored_folder);
+
+        let folders = list_dev_folders(test_dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[0].name, "folder-b");
+        assert!(!folders[0].is_git_repo);
+        assert_eq!(folders[1].name, "repo-a");
+        assert!(folders[1].is_git_repo);
+
+        let _ = std::fs::remove_dir_all(&test_dir);
     }
 }
 

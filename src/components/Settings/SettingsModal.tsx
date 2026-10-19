@@ -41,6 +41,9 @@ export const SettingsModal: React.FC = () => {
     loadGitInfo,
     diffRefreshDelayMs,
     setDiffRefreshDelayMs,
+    devDirectory,
+    setDevDirectory,
+    browseForDevDirectory,
   } = useSettingsStore();
 
   const {
@@ -346,6 +349,47 @@ export const SettingsModal: React.FC = () => {
                     <span>
                       <strong className="text-slate-300">AI Agent Optimization:</strong> When an AI coding assistant (e.g. Antigravity, Cursor, Claude Code) performs rapid multi-file writes, GitShark batches the changes into a single quiet-window refresh, preventing continuous UI flickering and diff unmounting.
                     </span>
+                  </div>
+                </div>
+
+                {/* Development Directory */}
+                <div className="space-y-3 pt-4 border-t border-shark-800">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-200">
+                      Development Directory
+                    </label>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Root folder containing your local repositories. All subfolders in this directory will be listed in the Open Repo dropdown.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={devDirectory || ""}
+                      onChange={(e) => setDevDirectory(e.target.value || null)}
+                      placeholder="e.g. D:\Development or /Users/name/Projects"
+                      className="flex-1 px-3 py-2 bg-shark-950 border border-shark-750 focus:border-sky-500 focus:outline-none rounded-lg text-xs font-mono text-slate-200 placeholder:text-slate-600 shadow-inner"
+                    />
+                    <button
+                      type="button"
+                      onClick={browseForDevDirectory}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-shark-800 hover:bg-shark-750 text-slate-200 border border-shark-700 hover:border-slate-500 rounded-lg text-xs font-medium transition-colors"
+                      title="Browse filesystem for development directory"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Browse...</span>
+                    </button>
+                    {devDirectory && (
+                      <button
+                        type="button"
+                        onClick={() => setDevDirectory(null)}
+                        className="px-2.5 py-2 text-slate-400 hover:text-rose-400 hover:bg-shark-800 border border-shark-750 rounded-lg text-xs transition-colors"
+                        title="Clear development directory"
+                      >
+                        Clear
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

@@ -6,10 +6,12 @@ import {
   validateGitPathIpc,
   pickGitExecutable,
   setDiffDebounceDelayIpc,
+  pickDirectory,
 } from "@/lib/ipc";
 
 const STORAGE_CUSTOM_GIT_PATH = "gitshark_custom_git_path";
 const STORAGE_DIFF_REFRESH_DELAY = "gitshark_diff_refresh_delay";
+const STORAGE_DEV_DIRECTORY = "gitshark_dev_directory";
 
 interface SettingsState {
   isSettingsOpen: boolean;
@@ -21,6 +23,7 @@ interface SettingsState {
   testResult: { valid: boolean; message: string } | null;
   saveMessage: { success: boolean; message: string } | null;
   diffRefreshDelayMs: number;
+  devDirectory: string | null;
 
   // Actions
   openSettings: (tab?: SettingsTab) => void;
@@ -28,6 +31,8 @@ interface SettingsState {
   setActiveTab: (tab: SettingsTab) => void;
   setCustomPathInput: (input: string) => void;
   setDiffRefreshDelayMs: (delayMs: number) => Promise<void>;
+  setDevDirectory: (path: string | null) => void;
+  browseForDevDirectory: () => Promise<string | null>;
   loadGitInfo: () => Promise<void>;
   browseForGitExecutable: () => Promise<void>;
   testPath: (path: string) => Promise<void>;
@@ -46,6 +51,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   testResult: null,
   saveMessage: null,
   diffRefreshDelayMs: 1500,
+  devDirectory: null,
+
+  setDevDirectory: (path: string | null) => {
+    const trimmed = path?.trim() || null;
+    if (trimmed) {
+      localStorage.setItem(STORAGE_DEV_DIRECTORY, trimmed);
+    } else {
+      localStorage.removeItem(STORAGE_DEV_DIRECTORY);
+    }
+    set({ devDirectory: trimmed });
+  },
+
+  browseForDevDirectory: async () => {
+    const picked = await pickDirectory("Select Development Directory");
+    if (picked) {
+      get().setDevDirectory(picked);
+      return picked;
+    }
+    return null;
+  },
 
   openSettings: (tab = "git") => {
     set({
@@ -185,6 +210,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         }
       } else {
         await setDiffDebounceDelayIpc(1500);
+      }
+
+      const savedDevDir = localStorage.getItem(STORAGE_DEV_DIRECTORY);
+      if (savedDevDir && savedDevDir.trim().length > 0) {
+        set({ devDirectory: savedDevDir.trim() });
       }
 
       await get().loadGitInfo();

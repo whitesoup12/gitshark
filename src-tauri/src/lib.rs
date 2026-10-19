@@ -99,6 +99,7 @@ pub fn run() {
             commands::get_shark_stats,
             commands::save_shark_stats,
             commands::get_git_auth_token,
+            commands::list_dev_folders,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

@@ -13,11 +13,13 @@ export interface SharkStats {
   pushesLaunched: number;
   stashesBuried: number;
   mergesToMain: number;
+  prsOpened: number;
   storagePath: string;
 }
 
 export const XP_PER_COMMIT = 1;
 export const XP_PER_PUSH = 5;
+export const XP_PER_NEW_PR = 10;
 export const XP_PER_MAIN_MERGE = 10;
 
 export interface SharkRankInfo {
@@ -89,10 +91,11 @@ export const SHARK_RANKS: {
 ];
 
 export function computeSharkRank(stats: SharkStats): SharkRankInfo {
+  const prs = Math.max(stats.prsOpened || 0, stats.mergesToMain || 0);
   const totalScore =
     stats.commitsSwum * XP_PER_COMMIT +
     stats.pushesLaunched * XP_PER_PUSH +
-    (stats.mergesToMain || 0) * XP_PER_MAIN_MERGE;
+    prs * XP_PER_NEW_PR;
 
   let current = SHARK_RANKS[0];
   for (const tier of SHARK_RANKS) {
@@ -145,12 +148,14 @@ function loadLocalStats(): SharkStats {
     const raw = localStorage.getItem(STORAGE_STATS);
     if (raw) {
       const parsed = JSON.parse(raw);
+      const prs = Math.max(Number(parsed.prsOpened) || 0, Number(parsed.mergesToMain) || 0);
       return {
         commitsSwum: Number(parsed.commitsSwum) || 0,
         changesChomped: Number(parsed.changesChomped) || 0,
         pushesLaunched: Number(parsed.pushesLaunched) || 0,
         stashesBuried: Number(parsed.stashesBuried) || 0,
-        mergesToMain: Number(parsed.mergesToMain) || 0,
+        mergesToMain: prs,
+        prsOpened: prs,
         storagePath: parsed.storagePath || "~/.gitshark/shark_stats.json",
       };
     }
@@ -163,6 +168,7 @@ function loadLocalStats(): SharkStats {
     pushesLaunched: 0,
     stashesBuried: 0,
     mergesToMain: 0,
+    prsOpened: 0,
     storagePath: "~/.gitshark/shark_stats.json",
   };
 }
@@ -185,7 +191,7 @@ interface SharkStoreState {
 
   initSharkStats: () => Promise<void>;
   recordSharkStat: (
-    kind: "commit" | "chomp" | "push" | "stash" | "main_merge",
+    kind: "commit" | "chomp" | "push" | "stash" | "pr" | "main_merge",
     amount?: number
   ) => void;
   setCelebrationsEnabled: (enabled: boolean) => void;
@@ -222,6 +228,13 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
         const diskStats = await getSharkStatsIpc();
         const local = get().stats;
 
+        const prs = Math.max(
+          local.prsOpened || 0,
+          local.mergesToMain || 0,
+          diskStats.prs_opened || 0,
+          diskStats.merges_to_main || 0
+        );
+
         // Merge disk ~/.gitshark/shark_stats.json with localStorage using Math.max
         // so stats survive app reinstalls, portable folder moves, or cache clears
         const merged: SharkStats = {
@@ -238,10 +251,8 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
             local.stashesBuried,
             diskStats.stashes_buried || 0
           ),
-          mergesToMain: Math.max(
-            local.mergesToMain || 0,
-            diskStats.merges_to_main || 0
-          ),
+          mergesToMain: prs,
+          prsOpened: prs,
           storagePath:
             diskStats.storage_path ||
             local.storagePath ||
@@ -258,6 +269,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
           pushes_launched: merged.pushesLaunched,
           stashes_buried: merged.stashesBuried,
           merges_to_main: merged.mergesToMain,
+          prs_opened: merged.prsOpened,
           storage_path: merged.storagePath,
         });
       } catch (err) {
@@ -266,11 +278,14 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
     },
 
     recordSharkStat: (
-      kind: "commit" | "chomp" | "push" | "stash" | "main_merge",
+      kind: "commit" | "chomp" | "push" | "stash" | "pr" | "main_merge",
       amount = 1
     ) => {
       const prevStats = get().stats;
       const prevRank = computeSharkRank(prevStats);
+
+      const prevPrs = Math.max(prevStats.prsOpened || 0, prevStats.mergesToMain || 0);
+      const nextPrs = kind === "pr" || kind === "main_merge" ? prevPrs + amount : prevPrs;
 
       const nextStats: SharkStats = {
         ...prevStats,
@@ -288,10 +303,8 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
           kind === "stash"
             ? prevStats.stashesBuried + amount
             : prevStats.stashesBuried,
-        mergesToMain:
-          kind === "main_merge"
-            ? (prevStats.mergesToMain || 0) + amount
-            : prevStats.mergesToMain || 0,
+        mergesToMain: nextPrs,
+        prsOpened: nextPrs,
       };
 
       saveLocalStats(nextStats);
@@ -313,6 +326,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
         pushes_launched: nextStats.pushesLaunched,
         stashes_buried: nextStats.stashesBuried,
         merges_to_main: nextStats.mergesToMain,
+        prs_opened: nextStats.prsOpened,
         storage_path: nextStats.storagePath,
       }).catch((err) => {
         console.warn("Failed to write shark stats to disk:", err);

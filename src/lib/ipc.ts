@@ -53,6 +53,56 @@ export async function pickRepositoryDirectory(): Promise<string | null> {
 }
 
 /**
+ * Open native directory picker to select a development directory
+ */
+export async function pickDirectory(title = "Select Development Directory"): Promise<string | null> {
+  try {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title,
+    });
+
+    if (Array.isArray(selected)) {
+      return selected[0] ?? null;
+    }
+    return selected;
+  } catch (err) {
+    if (!isTauriEnvironment()) {
+      const promptPath = await showPrompt({
+        title,
+        message: "Enter absolute directory path:",
+        placeholder: "D:\\Development",
+        confirmText: "Select",
+      });
+      return promptPath && promptPath.trim().length > 0 ? promptPath.trim() : null;
+    }
+    console.error("Failed to open directory dialog:", err);
+    return null;
+  }
+}
+
+export interface DevFolderItem {
+  name: string;
+  path: string;
+  is_git_repo: boolean;
+}
+
+/**
+ * List folders inside the development directory
+ */
+export async function listDevFoldersIpc(dirPath: string): Promise<DevFolderItem[]> {
+  if (!isTauriEnvironment()) {
+    return [
+      { name: "gitshark", path: `${dirPath}/gitshark`, is_git_repo: true },
+      { name: "aquarium-app", path: `${dirPath}/aquarium-app`, is_git_repo: true },
+      { name: "docs-site", path: `${dirPath}/docs-site`, is_git_repo: false },
+    ];
+  }
+  return await invoke<DevFolderItem[]>("list_dev_folders", { dirPath });
+}
+
+/**
  * Open repository via local filesystem path, creating a RepoSession in Rust
  */
 export async function openRepositoryIpc(path: string): Promise<RepoMetadata> {
@@ -1235,6 +1285,7 @@ export interface SharkStatsData {
   pushes_launched: number;
   stashes_buried: number;
   merges_to_main?: number;
+  prs_opened?: number;
   storage_path?: string;
 }
 
