@@ -846,6 +846,21 @@ export async function deleteBranchIpc(
 }
 
 /**
+ * Rename a local branch that is not yet pushed to origin
+ */
+export async function renameBranchIpc(
+  repoId: string,
+  oldName: string,
+  newName: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] rename_branch: ${oldName} -> ${newName} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("rename_branch", { repoId, oldName, newName });
+}
+
+/**
  * List repository stashes
  */
 export async function listStashesIpc(repoId: string): Promise<StashItem[]> {

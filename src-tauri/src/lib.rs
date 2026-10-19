@@ -74,6 +74,7 @@ pub fn run() {
             commands::checkout_branch,
             commands::create_branch,
             commands::delete_branch,
+            commands::rename_branch,
             commands::list_stashes,
             commands::create_stash,
             commands::apply_stash,

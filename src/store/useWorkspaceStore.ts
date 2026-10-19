@@ -36,6 +36,7 @@ import {
   checkoutBranchIpc,
   createBranchIpc,
   deleteBranchIpc,
+  renameBranchIpc,
   listStashesIpc,
   createStashIpc,
   applyStashIpc,
@@ -112,6 +113,7 @@ interface WorkspaceState {
   checkoutBranch: (tabId: string, branchName: string) => Promise<boolean>;
   createBranch: (tabId: string, branchName: string, targetCommit?: string, checkout?: boolean) => Promise<boolean>;
   deleteBranch: (tabId: string, branchName: string, isRemote?: boolean) => Promise<boolean>;
+  renameBranch: (tabId: string, oldName: string, newName: string) => Promise<boolean>;
 
   // Stashes
   fetchStashes: (tabId: string) => Promise<StashItem[]>;
@@ -1780,6 +1782,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       console.error("Failed to delete branch:", err);
       showAlert({
         title: "Delete Branch Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return false;
+    }
+  },
+
+  renameBranch: async (tabId: string, oldName: string, newName: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await renameBranchIpc(tab.repoId, oldName, newName);
+      useSharkStore
+        .getState()
+        .triggerCelebration("chomp", `Renamed branch '${oldName}' to '${newName}'! 🦈`);
+      await get().refreshTabMetadata(tabId);
+      await get().fetchBranches(tabId);
+      await get().fetchRemoteSyncStatus(tabId);
+      return true;
+    } catch (err) {
+      console.error("Failed to rename branch:", err);
+      showAlert({
+        title: "Rename Branch Failed",
         message: err instanceof Error ? err.message : String(err),
         variant: "error",
       });

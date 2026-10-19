@@ -1346,6 +1346,21 @@ pub async fn delete_branch(
 }
 
 #[tauri::command]
+pub async fn rename_branch(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::rename_branch(&repo, &old_name, &new_name)
+}
+
+#[tauri::command]
 pub async fn list_stashes(
     state: State<'_, AppRepoState>,
     repo_id: String,

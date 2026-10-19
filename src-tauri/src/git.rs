@@ -1448,6 +1448,93 @@ pub fn delete_branch(
     Ok(())
 }
 
+/// Rename a local branch that has not yet been pushed to origin
+pub fn rename_branch(
+    repo: &Repository,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    let old_clean = old_name.trim().trim_start_matches("refs/heads/");
+    let new_clean = new_name.trim().trim_start_matches("refs/heads/");
+
+    if new_clean.is_empty() {
+        return Err("Branch name cannot be empty".to_string());
+    }
+
+    if old_clean == new_clean {
+        return Ok(());
+    }
+
+    // Git branch naming validation
+    if new_clean.contains(' ')
+        || new_clean.contains("..")
+        || new_clean.contains('~')
+        || new_clean.contains('^')
+        || new_clean.contains(':')
+        || new_clean.contains('?')
+        || new_clean.contains('*')
+        || new_clean.contains('[')
+        || new_clean.contains('\\')
+        || new_clean.starts_with('/')
+        || new_clean.ends_with('/')
+        || new_clean.ends_with(".lock")
+        || new_clean.contains("@{")
+    {
+        return Err(format!("'{new_clean}' is not a valid git branch name"));
+    }
+
+    // 1. Locate the local branch
+    let mut branch = repo
+        .find_branch(old_clean, git2::BranchType::Local)
+        .map_err(|e| format!("Local branch '{old_clean}' not found: {e}"))?;
+
+    // 2. Verify it is not pushed to origin / remote
+    if branch.upstream().is_ok() {
+        return Err(format!(
+            "Cannot rename branch '{old_clean}': it is already pushed and tracking a remote branch."
+        ));
+    }
+
+    // Also verify no remote branch exists with this name (e.g. pushed without upstream tracking)
+    if let Ok(branches) = repo.branches(Some(git2::BranchType::Remote)) {
+        for branch_res in branches {
+            if let Ok((remote_branch, _)) = branch_res {
+                if let Some(shorthand) = remote_branch.get().shorthand() {
+                    let remote_suffix = shorthand.split('/').skip(1).collect::<Vec<_>>().join("/");
+                    if !remote_suffix.is_empty() && remote_suffix == old_clean {
+                        return Err(format!(
+                            "Cannot rename branch '{old_clean}': a corresponding remote branch '{shorthand}' already exists on origin."
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Check if target branch name already exists locally
+    if repo.find_branch(new_clean, git2::BranchType::Local).is_ok() {
+        return Err(format!("A local branch named '{new_clean}' already exists."));
+    }
+
+    // 4. Perform rename (force = false)
+    let is_head = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s == old_clean))
+        .unwrap_or(false);
+
+    branch
+        .rename(new_clean, false)
+        .map_err(|e| format!("Failed to rename branch '{old_clean}' to '{new_clean}': {e}"))?;
+
+    // 5. Ensure HEAD is in sync if this was the checked-out branch
+    if is_head {
+        let _ = repo.set_head(&format!("refs/heads/{new_clean}"));
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StashItem {
     pub index: usize,
@@ -1998,6 +2085,55 @@ mod tests {
         // Detached checkout to Commit 1
         checkout_commit(&repo, &c1_oid.to_string()).unwrap();
         assert!(repo.head_detached().unwrap());
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_rename_branch() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_rename_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+
+        // Create initial commit on main
+        let file_path = test_dir.join("readme.md");
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "Initial").unwrap();
+
+        let sig = git2::Signature::now("Shark", "shark@ocean.dev").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("readme.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let c1_oid = repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+        let c1 = repo.find_commit(c1_oid).unwrap();
+
+        // Create a new local feature branch
+        let branch = repo.branch("feature-calc", &c1, false).unwrap();
+        drop(branch);
+
+        // 1. Invalid branch name should fail
+        let res_invalid = rename_branch(&repo, "feature-calc", "feature calc with spaces");
+        assert!(res_invalid.is_err());
+
+        // 2. Renaming to existing branch name should fail
+        // If main or master is HEAD branch name:
+        let head_shorthand = repo.head().unwrap().shorthand().unwrap().to_string();
+        let res_existing = rename_branch(&repo, "feature-calc", &head_shorthand);
+        assert!(res_existing.is_err());
+
+        // 3. Valid rename succeeds
+        let res_ok = rename_branch(&repo, "feature-calc", "feature-shark-calc");
+        assert!(res_ok.is_ok(), "Rename should succeed: {:?}", res_ok);
+        assert!(repo.find_branch("feature-calc", git2::BranchType::Local).is_err());
+        assert!(repo.find_branch("feature-shark-calc", git2::BranchType::Local).is_ok());
+
+        // 4. Renaming current HEAD branch updates HEAD
+        checkout_branch(&repo, "feature-shark-calc").unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("feature-shark-calc"));
+        let res_head_rename = rename_branch(&repo, "feature-shark-calc", "feature-awesome");
+        assert!(res_head_rename.is_ok());
+        assert_eq!(repo.head().unwrap().shorthand(), Some("feature-awesome"));
 
         let _ = fs::remove_dir_all(&test_dir);
     }
