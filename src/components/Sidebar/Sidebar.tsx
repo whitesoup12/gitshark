@@ -293,7 +293,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         <div
           onMouseDown={handleSidebarResizeMouseDown}
           onDoubleClick={handleResetSidebarWidth}
-          className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+          className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
           title="Drag to resize sidebar for full branch names (Double-click to reset)"
         >
           <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
@@ -340,7 +340,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         </div>
       ) : (
         /* Expanded full sidebar content */
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 text-xs">
+        <div className="flex-1 overflow-y-auto mr-2 px-2 py-3 space-y-4 text-xs">
           {/* Section: Local Branches */}
           <div>
             <div className="flex items-center justify-between w-full px-1.5 py-1 text-slate-300 font-medium select-none group">

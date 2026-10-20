@@ -1418,6 +1418,35 @@ pub async fn drop_stash(
 }
 
 #[tauri::command]
+pub async fn get_stash_details(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    stash_index: usize,
+) -> Result<git::StashDetails, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let mut repo = session.repo.lock();
+    git::get_stash_details(&mut *repo, stash_index)
+}
+
+#[tauri::command]
+pub async fn get_stash_file_diff(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    stash_index: usize,
+    file_path: String,
+) -> Result<git::FileDiff, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let mut repo = session.repo.lock();
+    git::get_stash_file_diff(&mut *repo, stash_index, &file_path)
+}
+
+#[tauri::command]
 pub async fn get_commit_details(
     state: State<'_, AppRepoState>,
     repo_id: String,
@@ -1664,14 +1693,64 @@ pub struct SharkStatsData {
     pub prs_opened: u64,
     #[serde(default)]
     pub storage_path: String,
+    #[serde(default)]
+    pub exists: bool,
 }
 
-fn resolve_shark_stats_path() -> std::path::PathBuf {
+fn resolve_gitshark_dir() -> std::path::PathBuf {
     let home_dir = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    home_dir.join(".gitshark").join("shark_stats.json")
+    home_dir.join(".gitshark")
+}
+
+fn resolve_shark_stats_path() -> std::path::PathBuf {
+    resolve_gitshark_dir().join("shark_stats.json")
+}
+
+fn resolve_open_repos_path() -> std::path::PathBuf {
+    resolve_gitshark_dir().join("open_repos.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenReposSession {
+    pub open_paths: Vec<String>,
+    pub active_path: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_saved_open_repos() -> Result<OpenReposSession, String> {
+    let path = resolve_open_repos_path();
+    if path.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(mut session) = serde_json::from_str::<OpenReposSession>(&content) {
+                // Keep only paths that currently exist on disk
+                session.open_paths.retain(|p| std::path::Path::new(p).exists());
+                if let Some(ref active) = session.active_path {
+                    if !std::path::Path::new(active).exists() {
+                        session.active_path = session.open_paths.first().cloned();
+                    }
+                }
+                return Ok(session);
+            }
+        }
+    }
+    Ok(OpenReposSession::default())
+}
+
+#[tauri::command]
+pub fn save_open_repos(session: OpenReposSession) -> Result<(), String> {
+    let path = resolve_open_repos_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create ~/.gitshark directory: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(&session)
+        .map_err(|e| format!("Failed to serialize open repos: {e}"))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write open repos to {}: {e}", path.display()))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1683,6 +1762,7 @@ pub fn get_shark_stats() -> Result<SharkStatsData, String> {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(mut parsed) = serde_json::from_str::<SharkStatsData>(&content) {
                 parsed.storage_path = path_str;
+                parsed.exists = true;
                 return Ok(parsed);
             }
         }
@@ -1696,6 +1776,7 @@ pub fn get_shark_stats() -> Result<SharkStatsData, String> {
         merges_to_main: 0,
         prs_opened: 0,
         storage_path: path_str,
+        exists: false,
     })
 }
 
@@ -1864,6 +1945,28 @@ mod tests {
         assert_eq!(folders[1].name, "repo-a");
         assert!(folders[1].is_git_repo);
 
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_open_repos_path_resolution() {
+        let path = resolve_open_repos_path();
+        assert!(path.to_string_lossy().contains(".gitshark"));
+        assert!(path.to_string_lossy().ends_with("open_repos.json"));
+    }
+
+    #[test]
+    fn test_open_repos_session_save_and_load() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_session_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+        let session = OpenReposSession {
+            open_paths: vec![test_dir.to_string_lossy().to_string()],
+            active_path: Some(test_dir.to_string_lossy().to_string()),
+        };
+        let json = serde_json::to_string(&session).unwrap();
+        let loaded: OpenReposSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.open_paths.len(), 1);
+        assert_eq!(loaded.active_path, session.active_path);
         let _ = std::fs::remove_dir_all(&test_dir);
     }
 }

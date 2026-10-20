@@ -12,6 +12,8 @@ import type {
   CloneProgressPayload,
   RepoBranches,
   StashItem,
+  StashDetails,
+  FileDiff,
   CommitDetails,
   GitTagItem,
   GitBinaryInfo,
@@ -972,6 +974,87 @@ export async function dropStashIpc(repoId: string, index: number): Promise<void>
 }
 
 /**
+ * Get stash details and changed files
+ */
+export async function getStashDetailsIpc(
+  repoId: string,
+  stashIndex: number
+): Promise<StashDetails> {
+  if (!isTauriEnvironment()) {
+    return {
+      index: stashIndex,
+      commit_id: `stash-oid-${stashIndex}`,
+      message: `WIP on main: mock stash #${stashIndex}`,
+      timestamp: Math.floor(Date.now() / 1000) - 1800,
+      total_additions: 12,
+      total_deletions: 4,
+      files: [
+        {
+          path: "src/App.tsx",
+          status: "modified",
+          additions: 8,
+          deletions: 4,
+          is_untracked: false,
+        },
+        {
+          path: "src/new-feature.ts",
+          status: "untracked",
+          additions: 4,
+          deletions: 0,
+          is_untracked: true,
+        },
+      ],
+    };
+  }
+  return await invoke<StashDetails>("get_stash_details", {
+    repoId,
+    stashIndex,
+  });
+}
+
+/**
+ * Get file diff for a specific file inside a git stash
+ */
+export async function getStashFileDiffIpc(
+  repoId: string,
+  stashIndex: number,
+  filePath: string
+): Promise<FileDiff> {
+  if (!isTauriEnvironment()) {
+    return {
+      old_path: filePath,
+      new_path: filePath,
+      is_binary: false,
+      is_new: false,
+      is_deleted: false,
+      total_additions: 2,
+      total_deletions: 1,
+      hunks: [
+        {
+          header: "@@ -1,5 +1,6 @@",
+          old_start: 1,
+          old_lines: 5,
+          new_start: 1,
+          new_lines: 6,
+          patch: "Mock stash diff patch",
+          lines: [
+            { origin: " ", content: "// existing header", old_lineno: 1, new_lineno: 1 },
+            { origin: "-", content: "const oldVal = 1;", old_lineno: 2 },
+            { origin: "+", content: "const newVal = 2;", new_lineno: 2 },
+            { origin: "+", content: "const stashedVal = true;", new_lineno: 3 },
+          ],
+        },
+      ],
+    };
+  }
+  return await invoke<FileDiff>("get_stash_file_diff", {
+    repoId,
+    stashIndex,
+    filePath,
+  });
+}
+
+/**
  * Get commit details and changed files
  */
 export async function getCommitDetailsIpc(
@@ -1287,6 +1370,7 @@ export interface SharkStatsData {
   merges_to_main?: number;
   prs_opened?: number;
   storage_path?: string;
+  exists?: boolean;
 }
 
 /**
@@ -1326,6 +1410,59 @@ export async function getGitAuthTokenIpc(host?: string): Promise<string | null> 
     return null;
   }
   return await invoke<string | null>("get_git_auth_token", { host });
+}
+
+export interface OpenReposSession {
+  open_paths: string[];
+  active_path: string | null;
+}
+
+const STORAGE_SAVED_OPEN_REPOS = "gitshark_saved_open_repos";
+
+/**
+ * Load persistent open repositories session from ~/.gitshark/open_repos.json
+ */
+export async function getSavedOpenReposIpc(): Promise<OpenReposSession> {
+  if (!isTauriEnvironment()) {
+    try {
+      const raw = localStorage.getItem(STORAGE_SAVED_OPEN_REPOS);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return { open_paths: [], active_path: null };
+  }
+
+  try {
+    const session = await invoke<OpenReposSession>("get_saved_open_repos");
+    return session || { open_paths: [], active_path: null };
+  } catch (err) {
+    console.warn("Failed to get saved open repos from disk:", err);
+    try {
+      const raw = localStorage.getItem(STORAGE_SAVED_OPEN_REPOS);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return { open_paths: [], active_path: null };
+  }
+}
+
+/**
+ * Persist currently open repositories session to ~/.gitshark/open_repos.json
+ */
+export async function saveOpenReposIpc(session: OpenReposSession): Promise<void> {
+  try {
+    localStorage.setItem(STORAGE_SAVED_OPEN_REPOS, JSON.stringify(session));
+  } catch {
+    // ignore
+  }
+
+  if (!isTauriEnvironment()) {
+    return;
+  }
+
+  return await invoke<void>("save_open_repos", { session });
 }
 
 

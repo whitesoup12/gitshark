@@ -8,6 +8,8 @@ import {
   RemoteSyncStatus,
   RepoBranches,
   StashItem,
+  StashDetails,
+  FileDiff,
 } from "@/types";
 import {
   openRepositoryIpc,
@@ -41,6 +43,8 @@ import {
   createStashIpc,
   applyStashIpc,
   dropStashIpc,
+  getStashDetailsIpc,
+  getStashFileDiffIpc,
   listTagsIpc,
   createTagIpc,
   deleteTagIpc,
@@ -49,6 +53,8 @@ import {
   listenToTerminalData,
   getRepositoryRemoteUrlIpc,
   openInBrowserIpc,
+  getSavedOpenReposIpc,
+  saveOpenReposIpc,
 } from "@/lib/ipc";
 import { GitTagItem, PullRequestInfo } from "@/types";
 import { useSharkStore } from "@/store/useSharkStore";
@@ -72,6 +78,7 @@ interface WorkspaceState {
   setActiveView: (tabId: string, view: WorkspaceView) => void;
   refreshTabMetadata: (tabId: string) => Promise<void>;
   setCloneModalOpen: (open: boolean) => void;
+  initWorkspaceSession: () => Promise<void>;
 
   // Hook & Process Orchestration
   fetchRepoHooks: (tabId: string) => Promise<RepoHooksInfo | null>;
@@ -116,6 +123,8 @@ interface WorkspaceState {
 
   // Stashes
   fetchStashes: (tabId: string) => Promise<StashItem[]>;
+  fetchStashDetails: (tabId: string, stashIndex: number) => Promise<StashDetails | null>;
+  fetchStashFileDiff: (tabId: string, stashIndex: number, filePath: string) => Promise<FileDiff | null>;
   createStash: (tabId: string, message?: string, includeUntracked?: boolean) => Promise<boolean>;
   applyStash: (tabId: string, index: number, pop?: boolean) => Promise<boolean>;
   dropStash: (tabId: string, index: number) => Promise<boolean>;
@@ -142,10 +151,60 @@ interface WorkspaceState {
 const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
 const lastAutoFetchMap = new Map<string, number>();
 
+let sessionInitialized = false;
+let isInitializingSession = false;
+
+const persistOpenReposSession = (tabs: Tab[], activeTabId: string | null) => {
+  if (!sessionInitialized) return;
+  const open_paths = tabs
+    .map((t) => t.path)
+    .filter((p): p is string => Boolean(p));
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const active_path = activeTab?.path || null;
+
+  saveOpenReposIpc({ open_paths, active_path }).catch((err) => {
+    console.error("Failed to save open repos session:", err);
+  });
+};
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   cloneModalOpen: false,
+
+  initWorkspaceSession: async () => {
+    if (sessionInitialized || isInitializingSession) return;
+    isInitializingSession = true;
+
+    try {
+      const session = await getSavedOpenReposIpc();
+      if (session && session.open_paths && session.open_paths.length > 0) {
+        for (const repoPath of session.open_paths) {
+          try {
+            await get().openRepositoryTab(repoPath);
+          } catch (e) {
+            console.warn(`Failed to restore saved repository at '${repoPath}':`, e);
+          }
+        }
+
+        if (session.active_path) {
+          const currentTabs = get().tabs;
+          const matched = currentTabs.find(
+            (t) => t.path && t.path.toLowerCase() === session.active_path!.toLowerCase()
+          );
+          if (matched) {
+            get().setActiveTab(matched.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to initialize open repositories session:", err);
+    } finally {
+      sessionInitialized = true;
+      isInitializingSession = false;
+      persistOpenReposSession(get().tabs, get().activeTabId);
+    }
+  },
 
   setCloneModalOpen: (open: boolean) => {
     set({ cloneModalOpen: open });
@@ -191,6 +250,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     );
     if (existingTab) {
       set({ activeTabId: existingTab.id });
+      persistOpenReposSession(get().tabs, existingTab.id);
       return existingTab.id;
     }
 
@@ -255,6 +315,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ),
       }));
       get().autoFetchTab(tabId);
+      persistOpenReposSession(get().tabs, tabId);
       return tabId;
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -269,6 +330,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : tab
         ),
       }));
+      persistOpenReposSession(get().tabs, tabId);
       return tabId;
     }
   },
@@ -311,11 +373,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (nextActiveId) {
       get().autoFetchTab(nextActiveId);
     }
+    persistOpenReposSession(remainingTabs, nextActiveId);
   },
 
   setActiveTab: (tabId: string) => {
     set({ activeTabId: tabId });
     get().autoFetchTab(tabId);
+    persistOpenReposSession(get().tabs, tabId);
   },
 
   updateTab: (tabId: string, updates: Partial<Tab>) => {
@@ -1808,6 +1872,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         variant: "error",
       });
       return false;
+    }
+  },
+
+  fetchStashDetails: async (tabId: string, stashIndex: number) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return null;
+
+    try {
+      return await getStashDetailsIpc(tab.repoId, stashIndex);
+    } catch (err) {
+      console.error(`Failed to fetch details for stash #${stashIndex}:`, err);
+      showAlert({
+        title: "Load Stash Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return null;
+    }
+  },
+
+  fetchStashFileDiff: async (tabId: string, stashIndex: number, filePath: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return null;
+
+    try {
+      return await getStashFileDiffIpc(tab.repoId, stashIndex, filePath);
+    } catch (err) {
+      console.error(`Failed to fetch stash file diff (${filePath}):`, err);
+      showAlert({
+        title: "Load Stash Diff Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return null;
     }
   },
 

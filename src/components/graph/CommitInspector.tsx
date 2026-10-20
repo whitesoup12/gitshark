@@ -456,7 +456,7 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
         {/* Left Column: Author, Message, Parents */}
         <div
           style={{ width: `${leftColWidth}px` }}
-          className={`border-r border-shark-800 p-3 overflow-y-auto space-y-3.5 flex-shrink-0 bg-shark-950/20 text-slate-400 text-[11px] relative ${
+          className={`border-r border-shark-800 flex-shrink-0 bg-shark-950/20 text-slate-400 text-[11px] relative flex flex-col min-h-0 ${
             isResizingLeftCol ? "" : "transition-[width] duration-150"
           }`}
         >
@@ -464,11 +464,13 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
           <div
             onMouseDown={handleLeftColResizeMouseDown}
             onDoubleClick={handleResetLeftCol}
-            className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+            className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
             title="Drag to resize commit metadata panel (Double-click to reset)"
           >
             <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
           </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto mr-2 p-3 space-y-3.5">
 
           {/* Summary & Body */}
           <div className="space-y-1">
@@ -593,6 +595,7 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
                 <span className="italic text-slate-600">Root commit</span>
               )}
             </div>
+          </div>
           </div>
         </div>
 

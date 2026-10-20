@@ -148,7 +148,12 @@ function loadLocalStats(): SharkStats {
     const raw = localStorage.getItem(STORAGE_STATS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      const prs = Math.max(Number(parsed.prsOpened) || 0, Number(parsed.mergesToMain) || 0);
+      const prs =
+        typeof parsed.prsOpened === "number"
+          ? parsed.prsOpened
+          : typeof parsed.mergesToMain === "number"
+          ? parsed.mergesToMain
+          : 0;
       return {
         commitsSwum: Number(parsed.commitsSwum) || 0,
         changesChomped: Number(parsed.changesChomped) || 0,
@@ -228,50 +233,76 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
         const diskStats = await getSharkStatsIpc();
         const local = get().stats;
 
-        const prs = Math.max(
-          local.prsOpened || 0,
-          local.mergesToMain || 0,
-          diskStats.prs_opened || 0,
-          diskStats.merges_to_main || 0
-        );
+        if (diskStats.exists) {
+          // ~/.gitshark/shark_stats.json on disk is the authoritative source of truth.
+          // Prioritize prs_opened if explicitly defined on disk, otherwise merges_to_main.
+          const prs =
+            typeof diskStats.prs_opened === "number"
+              ? diskStats.prs_opened
+              : typeof diskStats.merges_to_main === "number"
+              ? diskStats.merges_to_main
+              : 0;
 
-        // Merge disk ~/.gitshark/shark_stats.json with localStorage using Math.max
-        // so stats survive app reinstalls, portable folder moves, or cache clears
-        const merged: SharkStats = {
-          commitsSwum: Math.max(local.commitsSwum, diskStats.commits_swum || 0),
-          changesChomped: Math.max(
-            local.changesChomped,
-            diskStats.changes_chomped || 0
-          ),
-          pushesLaunched: Math.max(
-            local.pushesLaunched,
-            diskStats.pushes_launched || 0
-          ),
-          stashesBuried: Math.max(
-            local.stashesBuried,
-            diskStats.stashes_buried || 0
-          ),
-          mergesToMain: prs,
-          prsOpened: prs,
-          storagePath:
-            diskStats.storage_path ||
-            local.storagePath ||
-            "~/.gitshark/shark_stats.json",
-        };
+          const loaded: SharkStats = {
+            commitsSwum: diskStats.commits_swum || 0,
+            changesChomped: diskStats.changes_chomped || 0,
+            pushesLaunched: diskStats.pushes_launched || 0,
+            stashesBuried: diskStats.stashes_buried || 0,
+            mergesToMain: prs,
+            prsOpened: prs,
+            storagePath:
+              diskStats.storage_path ||
+              local.storagePath ||
+              "~/.gitshark/shark_stats.json",
+          };
 
-        saveLocalStats(merged);
-        set({ stats: merged });
+          saveLocalStats(loaded);
+          set({ stats: loaded });
 
-        // Persist merged stats back to ~/.gitshark/shark_stats.json
-        await saveSharkStatsIpc({
-          commits_swum: merged.commitsSwum,
-          changes_chomped: merged.changesChomped,
-          pushes_launched: merged.pushesLaunched,
-          stashes_buried: merged.stashesBuried,
-          merges_to_main: merged.mergesToMain,
-          prs_opened: merged.prsOpened,
-          storage_path: merged.storagePath,
-        });
+          // If the disk file had diverging values between merges_to_main and prs_opened, synchronize them
+          if (diskStats.merges_to_main !== prs || diskStats.prs_opened !== prs) {
+            await saveSharkStatsIpc({
+              commits_swum: loaded.commitsSwum,
+              changes_chomped: loaded.changesChomped,
+              pushes_launched: loaded.pushesLaunched,
+              stashes_buried: loaded.stashesBuried,
+              merges_to_main: prs,
+              prs_opened: prs,
+              storage_path: loaded.storagePath,
+            });
+          }
+        } else {
+          // File does not exist yet on disk: initialize ~/.gitshark/shark_stats.json from localStorage
+          const prs =
+            typeof local.prsOpened === "number"
+              ? local.prsOpened
+              : typeof local.mergesToMain === "number"
+              ? local.mergesToMain
+              : 0;
+
+          const initial: SharkStats = {
+            ...local,
+            mergesToMain: prs,
+            prsOpened: prs,
+            storagePath:
+              diskStats.storage_path ||
+              local.storagePath ||
+              "~/.gitshark/shark_stats.json",
+          };
+
+          saveLocalStats(initial);
+          set({ stats: initial });
+
+          await saveSharkStatsIpc({
+            commits_swum: initial.commitsSwum,
+            changes_chomped: initial.changesChomped,
+            pushes_launched: initial.pushesLaunched,
+            stashes_buried: initial.stashesBuried,
+            merges_to_main: prs,
+            prs_opened: prs,
+            storage_path: initial.storagePath,
+          });
+        }
       } catch (err) {
         console.warn("Failed to sync shark stats from user home directory:", err);
       }
@@ -284,7 +315,10 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
       const prevStats = get().stats;
       const prevRank = computeSharkRank(prevStats);
 
-      const prevPrs = Math.max(prevStats.prsOpened || 0, prevStats.mergesToMain || 0);
+      const prevPrs =
+        typeof prevStats.prsOpened === "number"
+          ? prevStats.prsOpened
+          : prevStats.mergesToMain || 0;
       const nextPrs = kind === "pr" || kind === "main_merge" ? prevPrs + amount : prevPrs;
 
       const nextStats: SharkStats = {
