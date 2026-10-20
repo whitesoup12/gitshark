@@ -21,6 +21,7 @@ import {
   GitPullRequest,
   Layers,
   AlertTriangle,
+  Edit3,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -29,6 +30,7 @@ import { StashSection } from "./StashSection";
 import { TagSection } from "./TagSection";
 import { BranchContextMenu } from "./BranchContextMenu";
 import { DeleteBranchModal } from "./DeleteBranchModal";
+import { RenameBranchModal } from "./RenameBranchModal";
 import type { BranchItem, PullRequestInfo, WorktreeItem } from "@/types";
 import { APP_VERSION } from "@/constants/version";
 import { listenToStatusChanged, openInBrowserIpc } from "@/lib/ipc";
@@ -44,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     checkoutBranch,
     createBranch,
     deleteBranch,
+    renameBranch,
     executePull,
     executePush,
     executeFetch,
@@ -227,6 +230,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     }
   };
 
+  const [branchToRename, setBranchToRename] = useState<BranchItem | null>(null);
+  const [isRenamingBranch, setIsRenamingBranch] = useState(false);
+
   const handlePullBranch = async (branch: BranchItem) => {
     if (branch.is_remote) {
       const remoteName = branch.shorthand.split("/")[0] || "origin";
@@ -287,7 +293,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         <div
           onMouseDown={handleSidebarResizeMouseDown}
           onDoubleClick={handleResetSidebarWidth}
-          className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+          className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
           title="Drag to resize sidebar for full branch names (Double-click to reset)"
         >
           <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
@@ -334,7 +340,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         </div>
       ) : (
         /* Expanded full sidebar content */
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4 text-xs">
+        <div className="flex-1 overflow-y-auto mr-2 px-2 py-3 space-y-4 text-xs">
           {/* Section: Local Branches */}
           <div>
             <div className="flex items-center justify-between w-full px-1.5 py-1 text-slate-300 font-medium select-none group">
@@ -571,43 +577,57 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                           <span className="text-[10px] text-sky-400/80 font-mono font-semibold">HEAD</span>
                         )}
 
-                        {/* Non-current checkout & delete actions on hover */}
-                        {!isCurrent && (
-                          <div className="flex items-center gap-1">
+                        {/* Hover actions: Rename for unpushed branches, Checkout & Delete for non-current */}
+                        <div className="flex items-center gap-1">
+                          {!branch.upstream && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (linkedWorktree?.is_prunable) {
-                                  pruneWorktrees(tab.id);
-                                } else {
-                                  handleCheckoutBranch(branch);
+                                setBranchToRename(branch);
+                              }}
+                              className="p-1 rounded text-slate-500 hover:text-sky-300 hover:bg-shark-800 opacity-0 group-hover:opacity-100 transition-all"
+                              title={`Rename local branch '${branch.shorthand}'`}
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                          )}
+                          {!isCurrent && (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (linkedWorktree?.is_prunable) {
+                                    pruneWorktrees(tab.id);
+                                  } else {
+                                    handleCheckoutBranch(branch);
+                                  }
+                                }}
+                                className={`text-[10px] opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded border transition-all font-mono ${
+                                  linkedWorktree?.is_prunable
+                                    ? "text-rose-400 hover:text-rose-300 hover:bg-rose-950/70 border-rose-800/50"
+                                    : "text-slate-400 hover:text-sky-300 hover:bg-sky-950/70 border-transparent hover:border-sky-800/50"
+                                }`}
+                                title={
+                                  linkedWorktree?.is_prunable
+                                    ? `Branch locked by orphaned worktree at '${linkedWorktree.path}'. Click to prune and unlock.`
+                                    : `Checkout branch '${branch.shorthand}'`
                                 }
-                              }}
-                              className={`text-[10px] opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded border transition-all font-mono ${
-                                linkedWorktree?.is_prunable
-                                  ? "text-rose-400 hover:text-rose-300 hover:bg-rose-950/70 border-rose-800/50"
-                                  : "text-slate-400 hover:text-sky-300 hover:bg-sky-950/70 border-transparent hover:border-sky-800/50"
-                              }`}
-                              title={
-                                linkedWorktree?.is_prunable
-                                  ? `Branch locked by orphaned worktree at '${linkedWorktree.path}'. Click to prune and unlock.`
-                                  : `Checkout branch '${branch.shorthand}'`
-                              }
-                            >
-                              {linkedWorktree?.is_prunable ? "prune & unlock" : "checkout"}
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                promptDeleteBranch(branch.shorthand);
-                              }}
-                              className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-shark-800 opacity-0 group-hover:opacity-100 transition-all"
-                              title={`Delete branch '${branch.shorthand}'`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
+                              >
+                                {linkedWorktree?.is_prunable ? "prune & unlock" : "checkout"}
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  promptDeleteBranch(branch.shorthand);
+                                }}
+                                className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-shark-800 opacity-0 group-hover:opacity-100 transition-all"
+                                title={`Delete branch '${branch.shorthand}'`}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -854,6 +874,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
             setIsAddingBranch(true);
             setSectionsOpen((prev) => ({ ...prev, branches: true }));
           }}
+          onRename={(b) => setBranchToRename(b)}
           onDelete={(b) => promptDeleteBranch(b.shorthand, b.is_remote)}
           activePr={contextMenu.activePr}
           onOpenPr={(b) => {
@@ -866,6 +887,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
           linkedWorktree={contextMenu.linkedWorktree}
           onPruneWorktrees={() => pruneWorktrees(tab.id)}
           onOpenWorktreeTab={(path) => openRepositoryTab(path)}
+        />
+      )}
+
+      {/* Modal for Renaming Local Branches */}
+      {branchToRename && (
+        <RenameBranchModal
+          isOpen={true}
+          currentName={branchToRename.shorthand}
+          existingBranches={localBranches.map((b) => b.shorthand)}
+          isRenaming={isRenamingBranch}
+          onConfirm={async (newName) => {
+            setIsRenamingBranch(true);
+            try {
+              const success = await renameBranch(tab.id, branchToRename.shorthand, newName);
+              if (success) {
+                setBranchToRename(null);
+              }
+            } finally {
+              setIsRenamingBranch(false);
+            }
+          }}
+          onCancel={() => {
+            if (!isRenamingBranch) {
+              setBranchToRename(null);
+            }
+          }}
         />
       )}
 

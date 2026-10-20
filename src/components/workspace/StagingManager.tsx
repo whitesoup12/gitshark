@@ -347,7 +347,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
       <div
         onMouseDown={handleHorizontalResizeMouseDown}
         onDoubleClick={handleResetHorizontalWidth}
-        className="absolute top-0 -right-1 w-2.5 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
+        className="absolute top-0 -right-1 w-2 h-full cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/50 transition-colors z-20 group"
         title="Drag to resize file list panel (Double-click to reset)"
       >
         <div className="w-[1px] h-full mx-auto bg-transparent group-hover:bg-sky-400/80 transition-colors" />
@@ -472,7 +472,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           </div>
 
           {/* Staged Scroll List */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-0.5">
+          <div className="flex-1 min-h-0 overflow-y-auto mr-2 p-2 space-y-0.5">
             {stagedCount === 0 ? (
               <div className="px-3 py-3 text-slate-500 italic text-[11px]">
                 No staged changes
@@ -539,7 +539,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           </div>
 
           {/* Unstaged Scroll List */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-0.5">
+          <div className="flex-1 min-h-0 overflow-y-auto mr-2 p-2 space-y-0.5">
             {totalUnstaged === 0 ? (
               <div className="px-3 py-3 text-slate-500 italic text-[11px] flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />

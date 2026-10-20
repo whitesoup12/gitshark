@@ -1,7 +1,7 @@
 {
   "name": "gitshark",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run-tauri.mjs dev",

@@ -55,6 +55,25 @@ export interface StashItem {
   commit_id: string;
 }
 
+export interface StashFileChange {
+  path: string;
+  old_path?: string | null;
+  status: string; // "added" | "deleted" | "modified" | "renamed" | "untracked"
+  additions: number;
+  deletions: number;
+  is_untracked: boolean;
+}
+
+export interface StashDetails {
+  index: number;
+  commit_id: string;
+  message: string;
+  timestamp: number;
+  files: StashFileChange[];
+  total_additions: number;
+  total_deletions: number;
+}
+
 export interface GitTagItem {
   name: string;
   target_commit: string;

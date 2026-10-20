@@ -526,12 +526,12 @@ export const SharkWisdomModal: React.FC = () => {
             </div>
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
-              title="Branches merged into main/master (+10 XP each)"
+              title="Pull requests launched in GitShark (+10 XP each)"
             >
               <div className="text-xs font-bold font-mono text-purple-300">
-                {stats.mergesToMain || 0}
+                {stats.prsOpened ?? stats.mergesToMain ?? 0}
               </div>
-              <div className="text-[9px] text-slate-400 truncate">To Main</div>
+              <div className="text-[9px] text-slate-400 truncate">New PRs</div>
               <div className="text-[8px] font-mono text-purple-400/80">+10 XP</div>
             </div>
             <div

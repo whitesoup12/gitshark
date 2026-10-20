@@ -74,10 +74,13 @@ pub fn run() {
             commands::checkout_branch,
             commands::create_branch,
             commands::delete_branch,
+            commands::rename_branch,
             commands::list_stashes,
             commands::create_stash,
             commands::apply_stash,
             commands::drop_stash,
+            commands::get_stash_details,
+            commands::get_stash_file_diff,
             commands::get_commit_details,
             commands::get_commit_file_diff,
             commands::list_tags,
@@ -97,7 +100,10 @@ pub fn run() {
             commands::reset_to_commit,
             commands::get_shark_stats,
             commands::save_shark_stats,
+            commands::get_saved_open_repos,
+            commands::save_open_repos,
             commands::get_git_auth_token,
+            commands::list_dev_folders,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

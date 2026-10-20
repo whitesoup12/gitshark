@@ -14,6 +14,7 @@ import {
   GitPullRequest,
   Layers,
   AlertTriangle,
+  Edit3,
 } from "lucide-react";
 
 export interface BranchContextMenuProps {
@@ -27,6 +28,7 @@ export interface BranchContextMenuProps {
   onFetch: () => void;
   onMerge: (branch: BranchItem) => void;
   onCreateBranchFrom: (branch: BranchItem) => void;
+  onRename?: (branch: BranchItem) => void;
   onDelete: (branch: BranchItem) => void;
   onOpenPr?: (branch: BranchItem) => void;
   activePr?: import("@/types").PullRequestInfo | null;
@@ -46,6 +48,7 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
   onFetch,
   onMerge,
   onCreateBranchFrom,
+  onRename,
   onDelete,
   onOpenPr,
   activePr,
@@ -330,6 +333,37 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
             <span>Create Pull Request...</span>
           </button>
         ) : null}
+
+        {/* Rename Branch (Local unpushed branches only) */}
+        {!branch.is_remote && (
+          <button
+            onClick={() => {
+              if (!branch.upstream && onRename) {
+                onRename(branch);
+                onClose();
+              }
+            }}
+            disabled={Boolean(branch.upstream)}
+            className={`flex items-center justify-between w-full px-3 py-1.5 text-left transition-colors ${
+              branch.upstream
+                ? "text-slate-500 cursor-not-allowed opacity-60"
+                : "hover:bg-sky-600/20 hover:text-sky-300 text-slate-200 cursor-pointer"
+            }`}
+            title={
+              branch.upstream
+                ? `Cannot rename '${branch.shorthand}': already pushed to remote (${branch.upstream})`
+                : `Rename local branch '${branch.shorthand}'`
+            }
+          >
+            <div className="flex items-center gap-2">
+              <Edit3 className="w-3.5 h-3.5 text-sky-400" />
+              <span>Rename Branch...</span>
+            </div>
+            {branch.upstream && (
+              <span className="text-[10px] text-slate-500 italic">pushed</span>
+            )}
+          </button>
+        )}
 
         {/* Copy Branch Name */}
         <button

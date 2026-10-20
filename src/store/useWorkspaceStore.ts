@@ -8,6 +8,8 @@ import {
   RemoteSyncStatus,
   RepoBranches,
   StashItem,
+  StashDetails,
+  FileDiff,
 } from "@/types";
 import {
   openRepositoryIpc,
@@ -36,10 +38,13 @@ import {
   checkoutBranchIpc,
   createBranchIpc,
   deleteBranchIpc,
+  renameBranchIpc,
   listStashesIpc,
   createStashIpc,
   applyStashIpc,
   dropStashIpc,
+  getStashDetailsIpc,
+  getStashFileDiffIpc,
   listTagsIpc,
   createTagIpc,
   deleteTagIpc,
@@ -48,7 +53,8 @@ import {
   listenToTerminalData,
   getRepositoryRemoteUrlIpc,
   openInBrowserIpc,
-  getCommitGraphIpc,
+  getSavedOpenReposIpc,
+  saveOpenReposIpc,
 } from "@/lib/ipc";
 import { GitTagItem, PullRequestInfo } from "@/types";
 import { useSharkStore } from "@/store/useSharkStore";
@@ -72,6 +78,7 @@ interface WorkspaceState {
   setActiveView: (tabId: string, view: WorkspaceView) => void;
   refreshTabMetadata: (tabId: string) => Promise<void>;
   setCloneModalOpen: (open: boolean) => void;
+  initWorkspaceSession: () => Promise<void>;
 
   // Hook & Process Orchestration
   fetchRepoHooks: (tabId: string) => Promise<RepoHooksInfo | null>;
@@ -112,9 +119,12 @@ interface WorkspaceState {
   checkoutBranch: (tabId: string, branchName: string) => Promise<boolean>;
   createBranch: (tabId: string, branchName: string, targetCommit?: string, checkout?: boolean) => Promise<boolean>;
   deleteBranch: (tabId: string, branchName: string, isRemote?: boolean) => Promise<boolean>;
+  renameBranch: (tabId: string, oldName: string, newName: string) => Promise<boolean>;
 
   // Stashes
   fetchStashes: (tabId: string) => Promise<StashItem[]>;
+  fetchStashDetails: (tabId: string, stashIndex: number) => Promise<StashDetails | null>;
+  fetchStashFileDiff: (tabId: string, stashIndex: number, filePath: string) => Promise<FileDiff | null>;
   createStash: (tabId: string, message?: string, includeUntracked?: boolean) => Promise<boolean>;
   applyStash: (tabId: string, index: number, pop?: boolean) => Promise<boolean>;
   dropStash: (tabId: string, index: number) => Promise<boolean>;
@@ -141,10 +151,60 @@ interface WorkspaceState {
 const activeTimers = new Map<string, ReturnType<typeof setInterval>>();
 const lastAutoFetchMap = new Map<string, number>();
 
+let sessionInitialized = false;
+let isInitializingSession = false;
+
+const persistOpenReposSession = (tabs: Tab[], activeTabId: string | null) => {
+  if (!sessionInitialized) return;
+  const open_paths = tabs
+    .map((t) => t.path)
+    .filter((p): p is string => Boolean(p));
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const active_path = activeTab?.path || null;
+
+  saveOpenReposIpc({ open_paths, active_path }).catch((err) => {
+    console.error("Failed to save open repos session:", err);
+  });
+};
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   cloneModalOpen: false,
+
+  initWorkspaceSession: async () => {
+    if (sessionInitialized || isInitializingSession) return;
+    isInitializingSession = true;
+
+    try {
+      const session = await getSavedOpenReposIpc();
+      if (session && session.open_paths && session.open_paths.length > 0) {
+        for (const repoPath of session.open_paths) {
+          try {
+            await get().openRepositoryTab(repoPath);
+          } catch (e) {
+            console.warn(`Failed to restore saved repository at '${repoPath}':`, e);
+          }
+        }
+
+        if (session.active_path) {
+          const currentTabs = get().tabs;
+          const matched = currentTabs.find(
+            (t) => t.path && t.path.toLowerCase() === session.active_path!.toLowerCase()
+          );
+          if (matched) {
+            get().setActiveTab(matched.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to initialize open repositories session:", err);
+    } finally {
+      sessionInitialized = true;
+      isInitializingSession = false;
+      persistOpenReposSession(get().tabs, get().activeTabId);
+    }
+  },
 
   setCloneModalOpen: (open: boolean) => {
     set({ cloneModalOpen: open });
@@ -190,6 +250,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     );
     if (existingTab) {
       set({ activeTabId: existingTab.id });
+      persistOpenReposSession(get().tabs, existingTab.id);
       return existingTab.id;
     }
 
@@ -254,6 +315,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ),
       }));
       get().autoFetchTab(tabId);
+      persistOpenReposSession(get().tabs, tabId);
       return tabId;
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -268,6 +330,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             : tab
         ),
       }));
+      persistOpenReposSession(get().tabs, tabId);
       return tabId;
     }
   },
@@ -310,11 +373,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (nextActiveId) {
       get().autoFetchTab(nextActiveId);
     }
+    persistOpenReposSession(remainingTabs, nextActiveId);
   },
 
   setActiveTab: (tabId: string) => {
     set({ activeTabId: tabId });
     get().autoFetchTab(tabId);
+    persistOpenReposSession(get().tabs, tabId);
   },
 
   updateTab: (tabId: string, updates: Partial<Tab>) => {
@@ -696,15 +761,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (!tab || !tab.repoId) return false;
 
     const repoId = tab.repoId;
-    const targetBranch = (branch || tab.metadata?.current_branch || "").toLowerCase();
-    const prevMainBranchObj = tab.branches?.local.find(
-      (b) => b.shorthand.toLowerCase() === targetBranch
-    );
-    const prevTargetCommit =
-      prevMainBranchObj?.target_commit ||
-      (tab.metadata?.current_branch?.toLowerCase() === targetBranch
-        ? tab.metadata?.head_commit_hash
-        : undefined);
 
     get().updateTab(tabId, {
       terminalOpen: true,
@@ -773,68 +829,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
             });
 
             await get().refreshTabMetadata(tabId);
-
-            // Detect if pulling main/master brought in newly merged branches or PRs (+20 XP each)
-            const isMainOrMaster = targetBranch === "main" || targetBranch === "master";
-            if (isMainOrMaster && prevTargetCommit) {
-              const updatedTab = get().tabs.find((t) => t.id === tabId);
-              const newMainBranchObj = updatedTab?.branches?.local.find(
-                (b) => b.shorthand.toLowerCase() === targetBranch
-              );
-              const newTargetCommit =
-                newMainBranchObj?.target_commit ||
-                (updatedTab?.metadata?.current_branch?.toLowerCase() === targetBranch
-                  ? updatedTab?.metadata?.head_commit_hash
-                  : undefined);
-
-              if (newTargetCommit && newTargetCommit !== prevTargetCommit) {
-                let mergesCount = 1;
-                try {
-                  const recentGraph = await getCommitGraphIpc(repoId, 25, 0);
-                  const byHash = new Map(recentGraph.map((c) => [c.hash, c]));
-
-                  // Walk ONLY the first-parent spine of main from newTargetCommit -> prevTargetCommit
-                  // (up to 5 steps max so pulling an old/stale repo never dumps historical XP)
-                  const firstParentNewCommits = [];
-                  let cursor = byHash.get(newTargetCommit);
-                  let steps = 0;
-                  let reachedPrev = false;
-
-                  while (cursor && steps < 5) {
-                    if (cursor.hash === prevTargetCommit) {
-                      reachedPrev = true;
-                      break;
-                    }
-                    firstParentNewCommits.push(cursor);
-                    const firstParentHash = cursor.parents[0];
-                    cursor = firstParentHash ? byHash.get(firstParentHash) : undefined;
-                    steps++;
-                  }
-
-                  if (reachedPrev && firstParentNewCommits.length > 0) {
-                    const explicitMerges = firstParentNewCommits.filter(
-                      (c) =>
-                        c.parents.length > 1 ||
-                        /^merge\s+(pull request|branch|remote-tracking)/i.test(c.summary) ||
-                        /\(#\d+\)\s*$/.test(c.summary)
-                    ).length;
-                    if (explicitMerges > 0) {
-                      mergesCount = explicitMerges;
-                    }
-                  }
-                } catch {
-                  // Fallback to 1 merge if commit graph inspection fails
-                }
-
-                useSharkStore.getState().recordSharkStat("main_merge", mergesCount);
-                useSharkStore
-                  .getState()
-                  .triggerCelebration(
-                    "swim",
-                    `Branch landed on ${targetBranch}! (+${mergesCount * 10} XP) 🌊`
-                  );
-              }
-            }
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -1106,21 +1100,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
             await get().refreshTabMetadata(tabId);
 
-            // Award +10 XP when a branch is merged into main or master
-            const isMergingIntoMain =
-              (currentBranch === "main" || currentBranch === "master") &&
-              branch.toLowerCase() !== currentBranch &&
-              !branch.toLowerCase().endsWith(`/${currentBranch}`);
-
-            if (isMergingIntoMain) {
-              useSharkStore.getState().recordSharkStat("main_merge", 1);
-              useSharkStore
-                .getState()
-                .triggerCelebration(
-                  "swim",
-                  `Branch '${branch}' merged into ${currentBranch}! (+10 XP) 🦈`
-                );
-            }
+            useSharkStore
+              .getState()
+              .triggerCelebration(
+                "swim",
+                `Branch '${branch}' merged into ${currentBranch}! 🦈`
+              );
 
             setTimeout(() => {
               const checkTab = get().tabs.find((t) => t.id === tabId);
@@ -1787,6 +1772,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
+  renameBranch: async (tabId: string, oldName: string, newName: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    try {
+      await renameBranchIpc(tab.repoId, oldName, newName);
+      useSharkStore
+        .getState()
+        .triggerCelebration("chomp", `Renamed branch '${oldName}' to '${newName}'! 🦈`);
+      await get().refreshTabMetadata(tabId);
+      await get().fetchBranches(tabId);
+      await get().fetchRemoteSyncStatus(tabId);
+      return true;
+    } catch (err) {
+      console.error("Failed to rename branch:", err);
+      showAlert({
+        title: "Rename Branch Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return false;
+    }
+  },
+
   fetchStashes: async (tabId: string) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return [];
@@ -1863,6 +1872,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         variant: "error",
       });
       return false;
+    }
+  },
+
+  fetchStashDetails: async (tabId: string, stashIndex: number) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return null;
+
+    try {
+      return await getStashDetailsIpc(tab.repoId, stashIndex);
+    } catch (err) {
+      console.error(`Failed to fetch details for stash #${stashIndex}:`, err);
+      showAlert({
+        title: "Load Stash Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return null;
+    }
+  },
+
+  fetchStashFileDiff: async (tabId: string, stashIndex: number, filePath: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return null;
+
+    try {
+      return await getStashFileDiffIpc(tab.repoId, stashIndex, filePath);
+    } catch (err) {
+      console.error(`Failed to fetch stash file diff (${filePath}):`, err);
+      showAlert({
+        title: "Load Stash Diff Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return null;
     }
   },
 
@@ -2120,6 +2163,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     try {
       await openInBrowserIpc(prUrl);
+      useSharkStore.getState().recordSharkStat("pr", 1);
+      useSharkStore
+        .getState()
+        .triggerCelebration("swim", "Pull Request Launched! (+10 XP) 🦈");
       return true;
     } catch (e) {
       console.error("Failed to open PR in browser:", e);

@@ -12,6 +12,8 @@ import type {
   CloneProgressPayload,
   RepoBranches,
   StashItem,
+  StashDetails,
+  FileDiff,
   CommitDetails,
   GitTagItem,
   GitBinaryInfo,
@@ -50,6 +52,56 @@ export async function pickRepositoryDirectory(): Promise<string | null> {
     console.error("Failed to open native file explorer dialog:", err);
     return null;
   }
+}
+
+/**
+ * Open native directory picker to select a development directory
+ */
+export async function pickDirectory(title = "Select Development Directory"): Promise<string | null> {
+  try {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title,
+    });
+
+    if (Array.isArray(selected)) {
+      return selected[0] ?? null;
+    }
+    return selected;
+  } catch (err) {
+    if (!isTauriEnvironment()) {
+      const promptPath = await showPrompt({
+        title,
+        message: "Enter absolute directory path:",
+        placeholder: "D:\\Development",
+        confirmText: "Select",
+      });
+      return promptPath && promptPath.trim().length > 0 ? promptPath.trim() : null;
+    }
+    console.error("Failed to open directory dialog:", err);
+    return null;
+  }
+}
+
+export interface DevFolderItem {
+  name: string;
+  path: string;
+  is_git_repo: boolean;
+}
+
+/**
+ * List folders inside the development directory
+ */
+export async function listDevFoldersIpc(dirPath: string): Promise<DevFolderItem[]> {
+  if (!isTauriEnvironment()) {
+    return [
+      { name: "gitshark", path: `${dirPath}/gitshark`, is_git_repo: true },
+      { name: "aquarium-app", path: `${dirPath}/aquarium-app`, is_git_repo: true },
+      { name: "docs-site", path: `${dirPath}/docs-site`, is_git_repo: false },
+    ];
+  }
+  return await invoke<DevFolderItem[]>("list_dev_folders", { dirPath });
 }
 
 /**
@@ -846,6 +898,21 @@ export async function deleteBranchIpc(
 }
 
 /**
+ * Rename a local branch that is not yet pushed to origin
+ */
+export async function renameBranchIpc(
+  repoId: string,
+  oldName: string,
+  newName: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] rename_branch: ${oldName} -> ${newName} in ${repoId}`);
+    return;
+  }
+  return await invoke<void>("rename_branch", { repoId, oldName, newName });
+}
+
+/**
  * List repository stashes
  */
 export async function listStashesIpc(repoId: string): Promise<StashItem[]> {
@@ -904,6 +971,87 @@ export async function dropStashIpc(repoId: string, index: number): Promise<void>
     return;
   }
   return await invoke<void>("drop_stash", { repoId, index });
+}
+
+/**
+ * Get stash details and changed files
+ */
+export async function getStashDetailsIpc(
+  repoId: string,
+  stashIndex: number
+): Promise<StashDetails> {
+  if (!isTauriEnvironment()) {
+    return {
+      index: stashIndex,
+      commit_id: `stash-oid-${stashIndex}`,
+      message: `WIP on main: mock stash #${stashIndex}`,
+      timestamp: Math.floor(Date.now() / 1000) - 1800,
+      total_additions: 12,
+      total_deletions: 4,
+      files: [
+        {
+          path: "src/App.tsx",
+          status: "modified",
+          additions: 8,
+          deletions: 4,
+          is_untracked: false,
+        },
+        {
+          path: "src/new-feature.ts",
+          status: "untracked",
+          additions: 4,
+          deletions: 0,
+          is_untracked: true,
+        },
+      ],
+    };
+  }
+  return await invoke<StashDetails>("get_stash_details", {
+    repoId,
+    stashIndex,
+  });
+}
+
+/**
+ * Get file diff for a specific file inside a git stash
+ */
+export async function getStashFileDiffIpc(
+  repoId: string,
+  stashIndex: number,
+  filePath: string
+): Promise<FileDiff> {
+  if (!isTauriEnvironment()) {
+    return {
+      old_path: filePath,
+      new_path: filePath,
+      is_binary: false,
+      is_new: false,
+      is_deleted: false,
+      total_additions: 2,
+      total_deletions: 1,
+      hunks: [
+        {
+          header: "@@ -1,5 +1,6 @@",
+          old_start: 1,
+          old_lines: 5,
+          new_start: 1,
+          new_lines: 6,
+          patch: "Mock stash diff patch",
+          lines: [
+            { origin: " ", content: "// existing header", old_lineno: 1, new_lineno: 1 },
+            { origin: "-", content: "const oldVal = 1;", old_lineno: 2 },
+            { origin: "+", content: "const newVal = 2;", new_lineno: 2 },
+            { origin: "+", content: "const stashedVal = true;", new_lineno: 3 },
+          ],
+        },
+      ],
+    };
+  }
+  return await invoke<FileDiff>("get_stash_file_diff", {
+    repoId,
+    stashIndex,
+    filePath,
+  });
 }
 
 /**
@@ -1220,7 +1368,9 @@ export interface SharkStatsData {
   pushes_launched: number;
   stashes_buried: number;
   merges_to_main?: number;
+  prs_opened?: number;
   storage_path?: string;
+  exists?: boolean;
 }
 
 /**
@@ -1260,6 +1410,59 @@ export async function getGitAuthTokenIpc(host?: string): Promise<string | null> 
     return null;
   }
   return await invoke<string | null>("get_git_auth_token", { host });
+}
+
+export interface OpenReposSession {
+  open_paths: string[];
+  active_path: string | null;
+}
+
+const STORAGE_SAVED_OPEN_REPOS = "gitshark_saved_open_repos";
+
+/**
+ * Load persistent open repositories session from ~/.gitshark/open_repos.json
+ */
+export async function getSavedOpenReposIpc(): Promise<OpenReposSession> {
+  if (!isTauriEnvironment()) {
+    try {
+      const raw = localStorage.getItem(STORAGE_SAVED_OPEN_REPOS);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return { open_paths: [], active_path: null };
+  }
+
+  try {
+    const session = await invoke<OpenReposSession>("get_saved_open_repos");
+    return session || { open_paths: [], active_path: null };
+  } catch (err) {
+    console.warn("Failed to get saved open repos from disk:", err);
+    try {
+      const raw = localStorage.getItem(STORAGE_SAVED_OPEN_REPOS);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return { open_paths: [], active_path: null };
+  }
+}
+
+/**
+ * Persist currently open repositories session to ~/.gitshark/open_repos.json
+ */
+export async function saveOpenReposIpc(session: OpenReposSession): Promise<void> {
+  try {
+    localStorage.setItem(STORAGE_SAVED_OPEN_REPOS, JSON.stringify(session));
+  } catch {
+    // ignore
+  }
+
+  if (!isTauriEnvironment()) {
+    return;
+  }
+
+  return await invoke<void>("save_open_repos", { session });
 }
 
 

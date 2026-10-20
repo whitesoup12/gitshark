@@ -1,8 +1,9 @@
 import React from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { TabItem } from "./TabItem";
-import { Plus, Terminal as TerminalIcon, Download, Globe, GitPullRequest } from "lucide-react";
+import { Terminal as TerminalIcon, Download, Globe, GitPullRequest } from "lucide-react";
 import { SyncButton } from "./SyncButton";
+import { OpenRepoDropdown } from "./OpenRepoDropdown";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { useSharkStore, computeSharkRank } from "@/store/useSharkStore";
 import { openInBrowserIpc } from "@/lib/ipc";
@@ -13,7 +14,6 @@ export const TabBar: React.FC = () => {
     activeTabId,
     setActiveTab,
     closeTab,
-    openRepositoryTab,
     toggleTerminal,
     setCloneModalOpen,
     openRepoInBrowser,
@@ -27,7 +27,7 @@ export const TabBar: React.FC = () => {
   return (
     <header className="flex items-center justify-between bg-shark-950 border-b border-shark-800 h-10 select-none px-2 z-20">
       {/* Left side: Tabs container */}
-      <div className="flex items-center h-full overflow-x-auto no-scrollbar max-w-[calc(100vw-220px)]">
+      <div className="flex items-center h-full max-w-[calc(100vw-220px)] min-w-0">
         {/* App Logo / Mark + Shark Rank Pill */}
         <button
           onClick={() => openWisdom()}
@@ -46,8 +46,8 @@ export const TabBar: React.FC = () => {
           </span>
         </button>
 
-        {/* Tab Items List */}
-        <div className="flex items-center h-full">
+        {/* Tab Items List (scrollable) */}
+        <div className="flex items-center h-full overflow-x-auto no-scrollbar flex-shrink min-w-0">
           {tabs.map((tab) => (
             <TabItem
               key={tab.id}
@@ -59,25 +59,21 @@ export const TabBar: React.FC = () => {
           ))}
         </div>
 
-        {/* Open Repository (+) Button */}
-        <button
-          onClick={() => openRepositoryTab()}
-          className="flex items-center gap-1 h-7 px-2 ml-1 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-850 text-xs transition-colors border border-transparent hover:border-shark-750 flex-shrink-0"
-          title="Open Repository (Ctrl+O)"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Open Repo</span>
-        </button>
+        {/* Fixed Action Controls */}
+        <div className="flex items-center flex-shrink-0">
+          {/* Open Repository Dropdown */}
+          <OpenRepoDropdown />
 
-        {/* Clone Repository Button */}
-        <button
-          onClick={() => setCloneModalOpen(true)}
-          className="flex items-center gap-1 h-7 px-2 ml-1 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-850 text-xs transition-colors border border-transparent hover:border-shark-750 flex-shrink-0"
-          title="Clone Remote Repository"
-        >
-          <Download className="w-3.5 h-3.5 text-sky-400" />
-          <span className="hidden sm:inline">Clone</span>
-        </button>
+          {/* Clone Repository Button */}
+          <button
+            onClick={() => setCloneModalOpen(true)}
+            className="flex items-center gap-1 h-7 px-2 ml-1 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-850 text-xs transition-colors border border-transparent hover:border-shark-750 flex-shrink-0"
+            title="Clone Remote Repository"
+          >
+            <Download className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden sm:inline">Clone</span>
+          </button>
+        </div>
       </div>
 
       {/* Right side: Global utility toggles for active tab */}

@@ -1448,6 +1448,93 @@ pub fn delete_branch(
     Ok(())
 }
 
+/// Rename a local branch that has not yet been pushed to origin
+pub fn rename_branch(
+    repo: &Repository,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    let old_clean = old_name.trim().trim_start_matches("refs/heads/");
+    let new_clean = new_name.trim().trim_start_matches("refs/heads/");
+
+    if new_clean.is_empty() {
+        return Err("Branch name cannot be empty".to_string());
+    }
+
+    if old_clean == new_clean {
+        return Ok(());
+    }
+
+    // Git branch naming validation
+    if new_clean.contains(' ')
+        || new_clean.contains("..")
+        || new_clean.contains('~')
+        || new_clean.contains('^')
+        || new_clean.contains(':')
+        || new_clean.contains('?')
+        || new_clean.contains('*')
+        || new_clean.contains('[')
+        || new_clean.contains('\\')
+        || new_clean.starts_with('/')
+        || new_clean.ends_with('/')
+        || new_clean.ends_with(".lock")
+        || new_clean.contains("@{")
+    {
+        return Err(format!("'{new_clean}' is not a valid git branch name"));
+    }
+
+    // 1. Locate the local branch
+    let mut branch = repo
+        .find_branch(old_clean, git2::BranchType::Local)
+        .map_err(|e| format!("Local branch '{old_clean}' not found: {e}"))?;
+
+    // 2. Verify it is not pushed to origin / remote
+    if branch.upstream().is_ok() {
+        return Err(format!(
+            "Cannot rename branch '{old_clean}': it is already pushed and tracking a remote branch."
+        ));
+    }
+
+    // Also verify no remote branch exists with this name (e.g. pushed without upstream tracking)
+    if let Ok(branches) = repo.branches(Some(git2::BranchType::Remote)) {
+        for branch_res in branches {
+            if let Ok((remote_branch, _)) = branch_res {
+                if let Some(shorthand) = remote_branch.get().shorthand() {
+                    let remote_suffix = shorthand.split('/').skip(1).collect::<Vec<_>>().join("/");
+                    if !remote_suffix.is_empty() && remote_suffix == old_clean {
+                        return Err(format!(
+                            "Cannot rename branch '{old_clean}': a corresponding remote branch '{shorthand}' already exists on origin."
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Check if target branch name already exists locally
+    if repo.find_branch(new_clean, git2::BranchType::Local).is_ok() {
+        return Err(format!("A local branch named '{new_clean}' already exists."));
+    }
+
+    // 4. Perform rename (force = false)
+    let is_head = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s == old_clean))
+        .unwrap_or(false);
+
+    branch
+        .rename(new_clean, false)
+        .map_err(|e| format!("Failed to rename branch '{old_clean}' to '{new_clean}': {e}"))?;
+
+    // 5. Ensure HEAD is in sync if this was the checked-out branch
+    if is_head {
+        let _ = repo.set_head(&format!("refs/heads/{new_clean}"));
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StashItem {
     pub index: usize,
@@ -1510,6 +1597,227 @@ pub fn drop_stash(repo: &mut Repository, index: usize) -> Result<(), String> {
     repo.stash_drop(index)
         .map_err(|e| format!("Failed to drop stash #{index}: {e}"))?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashFileChange {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String, // "added", "deleted", "modified", "renamed", "untracked"
+    pub additions: usize,
+    pub deletions: usize,
+    pub is_untracked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashDetails {
+    pub index: usize,
+    pub commit_id: String,
+    pub message: String,
+    pub timestamp: i64,
+    pub files: Vec<StashFileChange>,
+    pub total_additions: usize,
+    pub total_deletions: usize,
+}
+
+/// Retrieve details and files changed in a specific stash entry
+pub fn get_stash_details(repo: &mut Repository, stash_index: usize) -> Result<StashDetails, String> {
+    let mut target_oid = None;
+    let mut target_msg = String::new();
+
+    repo.stash_foreach(|index, message, oid| {
+        if index == stash_index {
+            target_oid = Some(*oid);
+            target_msg = message.to_string();
+            return false;
+        }
+        true
+    })
+    .map_err(|e| format!("Failed to iterate stashes: {e}"))?;
+
+    let oid = target_oid.ok_or_else(|| format!("Stash #{stash_index} not found"))?;
+    let commit = repo.find_commit(oid).map_err(|e| format!("Stash commit not found: {e}"))?;
+
+    let timestamp = commit.time().seconds();
+    let commit_tree = commit.tree().map_err(|e| format!("Failed to get stash commit tree: {e}"))?;
+    let parent_tree = if commit.parent_count() > 0 {
+        Some(
+            commit
+                .parent(0)
+                .map_err(|e| format!("Failed to get parent commit: {e}"))?
+                .tree()
+                .map_err(|e| format!("Failed to get parent tree: {e}"))?,
+        )
+    } else {
+        None
+    };
+
+    let mut diff_opts = git2::DiffOptions::new();
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut diff_opts))
+        .map_err(|e| format!("Failed to generate stash diff: {e}"))?;
+
+    let mut files = Vec::new();
+
+    for (idx, delta) in diff.deltas().enumerate() {
+        let status = match delta.status() {
+            git2::Delta::Added => "added",
+            git2::Delta::Deleted => "deleted",
+            git2::Delta::Modified => "modified",
+            git2::Delta::Renamed => "renamed",
+            git2::Delta::Copied => "copied",
+            git2::Delta::Untracked => "untracked",
+            _ => "modified",
+        }
+        .to_string();
+
+        let new_file = delta.new_file();
+        let old_file = delta.old_file();
+
+        let path = new_file
+            .path()
+            .or_else(|| old_file.path())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+
+        let old_path = if delta.status() == git2::Delta::Renamed {
+            old_file
+                .path()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+        } else {
+            None
+        };
+
+        let mut additions = 0;
+        let mut deletions = 0;
+        if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, idx) {
+            let (_, adds, dels) = patch.line_stats().unwrap_or((0, 0, 0));
+            additions = adds;
+            deletions = dels;
+        }
+
+        files.push(StashFileChange {
+            path,
+            old_path,
+            status,
+            additions,
+            deletions,
+            is_untracked: false,
+        });
+    }
+
+    // Check for untracked files in parent(2) if stash was created with -u/include_untracked
+    if commit.parent_count() >= 3 {
+        if let Ok(untracked_commit) = commit.parent(2) {
+            if let Ok(untracked_tree) = untracked_commit.tree() {
+                let mut untracked_diff_opts = git2::DiffOptions::new();
+                if let Ok(untracked_diff) = repo.diff_tree_to_tree(
+                    None,
+                    Some(&untracked_tree),
+                    Some(&mut untracked_diff_opts),
+                ) {
+                    for (idx, delta) in untracked_diff.deltas().enumerate() {
+                        let path = delta
+                            .new_file()
+                            .path()
+                            .map(|p| p.to_string_lossy().replace('\\', "/"))
+                            .unwrap_or_default();
+
+                        let mut additions = 0;
+                        if let Ok(Some(patch)) = git2::Patch::from_diff(&untracked_diff, idx) {
+                            let (_, adds, _) = patch.line_stats().unwrap_or((0, 0, 0));
+                            additions = adds;
+                        }
+
+                        files.push(StashFileChange {
+                            path,
+                            old_path: None,
+                            status: "untracked".to_string(),
+                            additions,
+                            deletions: 0,
+                            is_untracked: true,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let total_additions = files.iter().map(|f| f.additions).sum();
+    let total_deletions = files.iter().map(|f| f.deletions).sum();
+
+    Ok(StashDetails {
+        index: stash_index,
+        commit_id: oid.to_string(),
+        message: target_msg,
+        timestamp,
+        files,
+        total_additions,
+        total_deletions,
+    })
+}
+
+/// Generate structured FileDiff for a specific file inside a git stash entry
+pub fn get_stash_file_diff(
+    repo: &mut Repository,
+    stash_index: usize,
+    target_path: &str,
+) -> Result<FileDiff, String> {
+    let mut target_oid = None;
+
+    repo.stash_foreach(|index, _, oid| {
+        if index == stash_index {
+            target_oid = Some(*oid);
+            return false;
+        }
+        true
+    })
+    .map_err(|e| format!("Failed to iterate stashes: {e}"))?;
+
+    let oid = target_oid.ok_or_else(|| format!("Stash #{stash_index} not found"))?;
+    let commit = repo.find_commit(oid).map_err(|e| format!("Stash commit not found: {e}"))?;
+
+    let clean_path = target_path.replace('\\', "/");
+    let clean_path = clean_path.trim_start_matches('/');
+
+    // Check if target_path belongs to untracked files commit (parent 2)
+    if commit.parent_count() >= 3 {
+        if let Ok(untracked_commit) = commit.parent(2) {
+            if let Ok(untracked_tree) = untracked_commit.tree() {
+                if untracked_tree.get_path(std::path::Path::new(clean_path)).is_ok() {
+                    let mut diff_opts = git2::DiffOptions::new();
+                    diff_opts.pathspec(clean_path);
+                    let diff = repo
+                        .diff_tree_to_tree(None, Some(&untracked_tree), Some(&mut diff_opts))
+                        .map_err(|e| format!("Failed to generate untracked stash diff: {e}"))?;
+                    return parse_git2_diff(&diff, clean_path);
+                }
+            }
+        }
+    }
+
+    // Default: diff commit tree against base parent(0)
+    let commit_tree = commit.tree().map_err(|e| format!("Failed to get stash commit tree: {e}"))?;
+    let parent_tree = if commit.parent_count() > 0 {
+        Some(
+            commit
+                .parent(0)
+                .map_err(|e| format!("Failed to get parent commit: {e}"))?
+                .tree()
+                .map_err(|e| format!("Failed to get parent tree: {e}"))?,
+        )
+    } else {
+        None
+    };
+
+    let mut diff_opts = git2::DiffOptions::new();
+    diff_opts.pathspec(clean_path);
+
+    let diff = repo
+        .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut diff_opts))
+        .map_err(|e| format!("Failed to generate stash diff: {e}"))?;
+
+    parse_git2_diff(&diff, clean_path)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1998,6 +2306,115 @@ mod tests {
         // Detached checkout to Commit 1
         checkout_commit(&repo, &c1_oid.to_string()).unwrap();
         assert!(repo.head_detached().unwrap());
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_rename_branch() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_rename_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+
+        // Create initial commit on main
+        let file_path = test_dir.join("readme.md");
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "Initial").unwrap();
+
+        let sig = git2::Signature::now("Shark", "shark@ocean.dev").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("readme.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let c1_oid = repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+        let c1 = repo.find_commit(c1_oid).unwrap();
+
+        // Create a new local feature branch
+        let branch = repo.branch("feature-calc", &c1, false).unwrap();
+        drop(branch);
+
+        // 1. Invalid branch name should fail
+        let res_invalid = rename_branch(&repo, "feature-calc", "feature calc with spaces");
+        assert!(res_invalid.is_err());
+
+        // 2. Renaming to existing branch name should fail
+        // If main or master is HEAD branch name:
+        let head_shorthand = repo.head().unwrap().shorthand().unwrap().to_string();
+        let res_existing = rename_branch(&repo, "feature-calc", &head_shorthand);
+        assert!(res_existing.is_err());
+
+        // 3. Valid rename succeeds
+        let res_ok = rename_branch(&repo, "feature-calc", "feature-shark-calc");
+        assert!(res_ok.is_ok(), "Rename should succeed: {:?}", res_ok);
+        assert!(repo.find_branch("feature-calc", git2::BranchType::Local).is_err());
+        assert!(repo.find_branch("feature-shark-calc", git2::BranchType::Local).is_ok());
+
+        // 4. Renaming current HEAD branch updates HEAD
+        checkout_branch(&repo, "feature-shark-calc").unwrap();
+        assert_eq!(repo.head().unwrap().shorthand(), Some("feature-shark-calc"));
+        let res_head_rename = rename_branch(&repo, "feature-shark-calc", "feature-awesome");
+        assert!(res_head_rename.is_ok());
+        assert_eq!(repo.head().unwrap().shorthand(), Some("feature-awesome"));
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_get_stash_details_and_diff() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_stash_test_{}", uuid::Uuid::new_v4()));
+        let mut repo = Repository::init(&test_dir).unwrap();
+
+        // 1. Initial commit
+        let file_path = test_dir.join("file1.txt");
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "Hello line 1").unwrap();
+
+        let sig = git2::Signature::now("Shark", "shark@ocean.dev").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("file1.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _ = repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+        drop(tree);
+        drop(index);
+
+        // 2. Modify tracked file and create untracked file
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "Hello line 1\nModified line 2").unwrap();
+
+        let untracked_path = test_dir.join("untracked.txt");
+        let mut uf = File::create(&untracked_path).unwrap();
+        writeln!(uf, "Untracked content").unwrap();
+
+        // 3. Create stash with untracked
+        create_stash(&mut repo, Some("WIP stash testing"), true).unwrap();
+
+        // 4. Inspect stash details
+        let stashes = list_stashes(&mut repo).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert_eq!(stashes[0].index, 0);
+
+        let details = get_stash_details(&mut repo, 0).unwrap();
+        assert_eq!(details.index, 0);
+        assert_eq!(details.files.len(), 2);
+
+        let file1 = details.files.iter().find(|f| f.path == "file1.txt").unwrap();
+        assert_eq!(file1.status, "modified");
+        assert!(!file1.is_untracked);
+
+        let file_untracked = details.files.iter().find(|f| f.path == "untracked.txt").unwrap();
+        assert_eq!(file_untracked.status, "untracked");
+        assert!(file_untracked.is_untracked);
+
+        // 5. Inspect file diff
+        let diff_file1 = get_stash_file_diff(&mut repo, 0, "file1.txt").unwrap();
+        assert!(!diff_file1.hunks.is_empty());
+        assert_eq!(diff_file1.new_path.as_deref(), Some("file1.txt"));
+
+        let diff_untracked = get_stash_file_diff(&mut repo, 0, "untracked.txt").unwrap();
+        assert!(!diff_untracked.hunks.is_empty());
+        assert_eq!(diff_untracked.new_path.as_deref(), Some("untracked.txt"));
 
         let _ = fs::remove_dir_all(&test_dir);
     }

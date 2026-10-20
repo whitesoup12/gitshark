@@ -11,7 +11,7 @@ import { SharkCelebrationOverlay, SharkWisdomModal } from "@/components/common/S
 import { GlobalDialogHost } from "@/components/common/GlobalDialogHost";
 
 export const App: React.FC = () => {
-  const { tabs, activeTabId } = useWorkspaceStore();
+  const { tabs, activeTabId, initWorkspaceSession } = useWorkspaceStore();
   const { initSettings, openSettings, isSettingsOpen, closeSettings } = useSettingsStore();
   const { initSharkStats } = useSharkStore();
 
@@ -20,7 +20,8 @@ export const App: React.FC = () => {
   useEffect(() => {
     initSettings();
     initSharkStats();
-  }, [initSettings, initSharkStats]);
+    initWorkspaceSession();
+  }, [initSettings, initSharkStats, initWorkspaceSession]);
 
   // Global keyboard shortcuts: Ctrl+, / Cmd+, for Settings, Escape to close
   useEffect(() => {
