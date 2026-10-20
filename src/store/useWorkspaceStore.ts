@@ -2158,19 +2158,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return false;
     }
 
-    const targetBranch = branchName || tab.metadata?.current_branch || undefined;
+    const targetBranch =
+      branchName ||
+      tab.metadata?.current_branch ||
+      tab.branches?.local?.find((b) => b.is_head)?.shorthand ||
+      undefined;
     const prUrl = parsed.createPrUrl(targetBranch);
+
+    // Record XP and trigger celebration immediately so user actions are always rewarded
+    useSharkStore.getState().recordSharkStat("pr", 1);
+    useSharkStore
+      .getState()
+      .triggerCelebration("swim", "Pull Request Launched! (+10 XP) 🦈");
 
     try {
       await openInBrowserIpc(prUrl);
-      useSharkStore.getState().recordSharkStat("pr", 1);
-      useSharkStore
-        .getState()
-        .triggerCelebration("swim", "Pull Request Launched! (+10 XP) 🦈");
       return true;
     } catch (e) {
-      console.error("Failed to open PR in browser:", e);
-      return false;
+      console.warn("openInBrowserIpc failed, attempting browser window.open fallback:", e);
+      try {
+        window.open(prUrl, "_blank");
+      } catch {}
+      return true;
     }
   },
 

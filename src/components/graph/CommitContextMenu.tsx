@@ -30,7 +30,8 @@ interface CommitContextMenuProps {
   onCreateTagFromCommit: (
     commit: CommitNode,
     tagName: string,
-    message?: string
+    message?: string,
+    pushToRemote?: boolean
   ) => Promise<void>;
   onResetToCommit: (
     commit: CommitNode,
@@ -63,6 +64,7 @@ export const CommitContextMenu: React.FC<CommitContextMenuProps> = ({
   const [checkoutNewBranch, setCheckoutNewBranch] = useState(true);
   const [tagName, setTagName] = useState("");
   const [tagMessage, setTagMessage] = useState("");
+  const [pushTagToRemote, setPushTagToRemote] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -112,7 +114,8 @@ export const CommitContextMenu: React.FC<CommitContextMenuProps> = ({
       await onCreateTagFromCommit(
         commit,
         tagName.trim(),
-        tagMessage.trim() || undefined
+        tagMessage.trim() || undefined,
+        pushTagToRemote
       );
       onClose();
     } finally {
@@ -218,6 +221,15 @@ export const CommitContextMenu: React.FC<CommitContextMenuProps> = ({
             placeholder="Annotation message (optional)"
             className="w-full px-2.5 py-1.5 rounded bg-shark-950 border border-shark-750 focus:border-amber-500 text-xs text-slate-200 outline-none"
           />
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={pushTagToRemote}
+              onChange={(e) => setPushTagToRemote(e.target.checked)}
+              className="rounded bg-shark-900 border-shark-700 text-amber-500 focus:ring-0"
+            />
+            <span>Push to remote</span>
+          </label>
           <div className="flex items-center justify-end gap-1.5 pt-1">
             <button
               type="button"

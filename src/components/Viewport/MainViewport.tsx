@@ -473,8 +473,8 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
                 onCreateBranchFromCommit={async (c, branchName, checkout) => {
                   await createBranch(tab.id, branchName, c.hash, checkout);
                 }}
-                onCreateTagFromCommit={async (c, tagName, message) => {
-                  await createTag(tab.id, tagName, c.hash, message, false);
+                onCreateTagFromCommit={async (c, tagName, message, pushToRemote) => {
+                  await createTag(tab.id, tagName, c.hash, message, pushToRemote ?? false);
                 }}
                 onResetToCommit={async (c, mode) => {
                   await resetToCommit(tab.id, c.hash, mode);
