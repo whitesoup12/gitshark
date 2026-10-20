@@ -168,6 +168,96 @@ pub async fn stage_hunk(
 }
 
 #[tauri::command]
+pub async fn unstage_hunk(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    file_path: String,
+    hunk: git::DiffHunk,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let all_indices: Vec<usize> = (0..hunk.lines.len()).collect();
+    let patch = git::build_selected_lines_patch(&file_path, &hunk, &all_indices, true)?;
+    let repo_guard = session.repo.lock();
+    git::unstage_patch(&repo_guard, &patch)
+}
+
+#[tauri::command]
+pub async fn discard_hunk(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    file_path: String,
+    hunk: git::DiffHunk,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let all_indices: Vec<usize> = (0..hunk.lines.len()).collect();
+    let patch = git::build_selected_lines_patch(&file_path, &hunk, &all_indices, true)?;
+    let repo_guard = session.repo.lock();
+    git::discard_patch(&repo_guard, &patch)
+}
+
+#[tauri::command]
+pub async fn stage_selected_lines(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    file_path: String,
+    hunk: git::DiffHunk,
+    selected_indices: Vec<usize>,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let patch = git::build_selected_lines_patch(&file_path, &hunk, &selected_indices, false)?;
+    let repo_guard = session.repo.lock();
+    git::stage_hunk(&repo_guard, &patch)
+}
+
+#[tauri::command]
+pub async fn unstage_selected_lines(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    file_path: String,
+    hunk: git::DiffHunk,
+    selected_indices: Vec<usize>,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let patch = git::build_selected_lines_patch(&file_path, &hunk, &selected_indices, true)?;
+    let repo_guard = session.repo.lock();
+    git::unstage_patch(&repo_guard, &patch)
+}
+
+#[tauri::command]
+pub async fn discard_selected_lines(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    file_path: String,
+    hunk: git::DiffHunk,
+    selected_indices: Vec<usize>,
+) -> Result<(), String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let patch = git::build_selected_lines_patch(&file_path, &hunk, &selected_indices, true)?;
+    let repo_guard = session.repo.lock();
+    git::discard_patch(&repo_guard, &patch)
+}
+
+#[tauri::command]
 pub async fn discard_file_changes(
     state: State<'_, AppRepoState>,
     repo_id: String,
@@ -210,6 +300,232 @@ pub async fn get_file_diff(
 
     let repo_guard = session.repo.lock();
     git::get_file_diff(&repo_guard, &path, staged)
+}
+
+#[tauri::command]
+pub async fn get_conflicted_file_details(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    path: String,
+) -> Result<git::ConflictFileDetails, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let repo_guard = session.repo.lock();
+    git::get_conflicted_file_details(&repo_guard, &path)
+}
+
+#[tauri::command]
+pub async fn resolve_conflict_choice(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    path: String,
+    choice: String,
+) -> Result<(), String> {
+    let (workdir, git_cmd) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.path.clone(), resolve_git_command())
+    };
+
+    let flag = match choice.as_str() {
+        "ours" => "--ours",
+        "theirs" => "--theirs",
+        _ => return Err(format!("Invalid conflict choice '{choice}', expected 'ours' or 'theirs'")),
+    };
+
+    let output = create_silent_command(&git_cmd)
+        .args(["checkout", flag, "--", &path])
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| format!("Failed to execute git checkout {flag}: {e}"))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git checkout {flag} failed: {err}"));
+    }
+
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+    let repo_guard = session.repo.lock();
+    git::stage_file(&repo_guard, &path)
+}
+
+#[tauri::command]
+pub async fn save_and_stage_resolved_file(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let workdir = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        session.path.clone()
+    };
+
+    let full_path = workdir.join(&path);
+    std::fs::write(&full_path, content.as_bytes())
+        .map_err(|e| format!("Failed to write resolved content to '{path}': {e}"))?;
+
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+    let repo_guard = session.repo.lock();
+    git::stage_file(&repo_guard, &path)
+}
+
+#[tauri::command]
+pub async fn abort_repo_operation(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (workdir, git_cmd, repo_state) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        let repo_guard = session.repo.lock();
+        let (state_name, _) = git::get_repository_state_info(&repo_guard);
+        (session.path.clone(), resolve_git_command(), state_name)
+    };
+
+    let args: Vec<&str> = match repo_state.as_str() {
+        "merge" => vec!["merge", "--abort"],
+        "rebase" => vec!["rebase", "--abort"],
+        "cherry_pick" => vec!["cherry-pick", "--abort"],
+        "revert" => vec!["revert", "--abort"],
+        _ => {
+            if workdir.join(".git").join("MERGE_HEAD").exists() {
+                vec!["merge", "--abort"]
+            } else if workdir.join(".git").join("rebase-merge").exists() || workdir.join(".git").join("rebase-apply").exists() {
+                vec!["rebase", "--abort"]
+            } else if workdir.join(".git").join("CHERRY_PICK_HEAD").exists() {
+                vec!["cherry-pick", "--abort"]
+            } else if workdir.join(".git").join("REVERT_HEAD").exists() {
+                vec!["revert", "--abort"]
+            } else {
+                return Err("No active merge, rebase, cherry-pick, or revert operation to abort.".to_string());
+            }
+        }
+    };
+
+    let output = create_silent_command(&git_cmd)
+        .args(&args)
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| format!("Failed to execute git {}: {e}", args.join(" ")))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git {} failed: {err}", args.join(" ")));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn continue_repo_operation(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+) -> Result<(), String> {
+    let (pty_manager, workdir, git_cmd, repo_state) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        let repo_guard = session.repo.lock();
+        let (state_name, _) = git::get_repository_state_info(&repo_guard);
+        (session.pty_manager.clone(), session.path.clone(), resolve_git_command(), state_name)
+    };
+
+    let args: Vec<String> = match repo_state.as_str() {
+        "merge" => vec!["commit".to_string(), "--no-edit".to_string()],
+        "rebase" => vec!["rebase".to_string(), "--continue".to_string()],
+        "cherry_pick" => vec!["cherry-pick".to_string(), "--continue".to_string()],
+        "revert" => vec!["revert".to_string(), "--continue".to_string()],
+        _ => {
+            if workdir.join(".git").join("MERGE_HEAD").exists() {
+                vec!["commit".to_string(), "--no-edit".to_string()]
+            } else if workdir.join(".git").join("rebase-merge").exists() || workdir.join(".git").join("rebase-apply").exists() {
+                vec!["rebase".to_string(), "--continue".to_string()]
+            } else if workdir.join(".git").join("CHERRY_PICK_HEAD").exists() {
+                vec!["cherry-pick".to_string(), "--continue".to_string()]
+            } else if workdir.join(".git").join("REVERT_HEAD").exists() {
+                vec!["revert".to_string(), "--continue".to_string()]
+            } else {
+                return Err("No active operation to continue.".to_string());
+            }
+        }
+    };
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn get_file_blame(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    path: String,
+) -> Result<git::FileBlameData, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+
+    let repo_guard = session.repo.lock();
+    git::get_file_blame(&repo_guard, &path)
+}
+
+#[tauri::command]
+pub async fn get_file_history(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    path: String,
+) -> Result<Vec<git::FileHistoryItem>, String> {
+    let (workdir, git_cmd) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.path.clone(), resolve_git_command())
+    };
+
+    let output = create_silent_command(&git_cmd)
+        .args([
+            "log",
+            "--follow",
+            "-n",
+            "100",
+            "--format=%H%x00%an%x00%ae%x00%at%x00%s",
+            "--shortstat",
+            "--",
+            &path,
+        ])
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| format!("Failed to execute git log: {e}"))?;
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    Ok(git::parse_file_history_output(&output_str))
 }
 
 #[tauri::command]

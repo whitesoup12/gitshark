@@ -19,13 +19,19 @@ pub struct RepoMetadata {
     pub staged_count: usize,
     pub unstaged_count: usize,
     pub untracked_count: usize,
+    #[serde(default)]
+    pub conflicted_count: usize,
+    #[serde(default)]
+    pub repo_state: String,
+    #[serde(default)]
+    pub repo_state_label: Option<String>,
     pub remote_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileStatusItem {
     pub path: String,
-    pub status: String, // "modified", "new", "deleted", "renamed", "typechange", "untracked"
+    pub status: String, // "modified", "new", "deleted", "renamed", "typechange", "untracked", "conflicted"
     pub staged: bool,
 }
 
@@ -34,6 +40,66 @@ pub struct WorkingTreeStatus {
     pub staged: Vec<FileStatusItem>,
     pub unstaged: Vec<FileStatusItem>,
     pub untracked: Vec<FileStatusItem>,
+    #[serde(default)]
+    pub conflicted: Vec<FileStatusItem>,
+    #[serde(default)]
+    pub repo_state: String,
+    #[serde(default)]
+    pub repo_state_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictBlock {
+    pub id: usize,
+    pub ours_header: String,
+    pub ours_content: String,
+    pub base_content: Option<String>,
+    pub theirs_content: String,
+    pub theirs_header: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictFileDetails {
+    pub path: String,
+    pub full_content: String,
+    pub ours_content: Option<String>,
+    pub theirs_content: Option<String>,
+    pub base_content: Option<String>,
+    pub blocks: Vec<ConflictBlock>,
+    pub is_binary: bool,
+    pub has_conflict_markers: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlameHunkItem {
+    pub commit_id: String,
+    pub commit_summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+    pub start_line: usize,
+    pub lines_in_hunk: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileBlameData {
+    pub path: String,
+    pub is_binary: bool,
+    pub lines: Vec<String>,
+    pub hunks: Vec<BlameHunkItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileHistoryItem {
+    pub commit_hash: String,
+    pub summary: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+    pub additions: usize,
+    pub deletions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,9 +238,14 @@ pub fn inspect_repository(
     let mut staged_count = 0;
     let mut unstaged_count = 0;
     let mut untracked_count = 0;
+    let mut conflicted_count = 0;
 
     for entry in statuses.iter() {
         let s = entry.status();
+        if s.contains(Status::CONFLICTED) {
+            conflicted_count += 1;
+            continue;
+        }
         if s.intersects(
             Status::INDEX_NEW
                 | Status::INDEX_MODIFIED
@@ -197,8 +268,9 @@ pub fn inspect_repository(
         }
     }
 
-    let is_dirty = staged_count > 0 || unstaged_count > 0 || untracked_count > 0;
+    let is_dirty = staged_count > 0 || unstaged_count > 0 || untracked_count > 0 || conflicted_count > 0;
     let remote_url = get_remote_url(repo, None);
+    let (repo_state, repo_state_label) = get_repository_state_info(repo);
 
     Ok(RepoMetadata {
         id: session_id.to_string(),
@@ -212,6 +284,9 @@ pub fn inspect_repository(
         staged_count,
         unstaged_count,
         untracked_count,
+        conflicted_count,
+        repo_state,
+        repo_state_label,
         remote_url,
     })
 }
@@ -236,7 +311,37 @@ pub fn get_remote_url(repo: &Repository, remote_name: Option<&str>) -> Option<St
     None
 }
 
-/// Query working tree status into categorized lists: staged, unstaged, untracked
+/// Detect the active repository lifecycle state (Clean, Merge, Rebase, CherryPick, Revert, Bisect)
+pub fn get_repository_state_info(repo: &Repository) -> (String, Option<String>) {
+    match repo.state() {
+        git2::RepositoryState::Clean => ("clean".to_string(), None),
+        git2::RepositoryState::Merge => {
+            let msg = std::fs::read_to_string(repo.path().join("MERGE_MSG"))
+                .ok()
+                .and_then(|m| m.lines().next().map(|l| l.trim().to_string()));
+            ("merge".to_string(), msg.or_else(|| Some("Merge in progress".to_string())))
+        }
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => {
+            ("revert".to_string(), Some("Revert in progress".to_string()))
+        }
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+            ("cherry_pick".to_string(), Some("Cherry-pick in progress".to_string()))
+        }
+        git2::RepositoryState::Bisect => {
+            ("bisect".to_string(), Some("Bisect in progress".to_string()))
+        }
+        git2::RepositoryState::Rebase
+        | git2::RepositoryState::RebaseInteractive
+        | git2::RepositoryState::RebaseMerge => {
+            ("rebase".to_string(), Some("Rebase in progress".to_string()))
+        }
+        git2::RepositoryState::ApplyMailbox | git2::RepositoryState::ApplyMailboxOrRebase => {
+            ("apply_mailbox".to_string(), Some("Mailbox apply in progress".to_string()))
+        }
+    }
+}
+
+/// Query working tree status into categorized lists: staged, unstaged, untracked, conflicted
 pub fn get_working_tree_status(repo: &Repository) -> Result<WorkingTreeStatus, String> {
     // Reload index from disk so external operations (like git commit in PTY) are reflected immediately
     if let Ok(mut idx) = repo.index() {
@@ -256,10 +361,21 @@ pub fn get_working_tree_status(repo: &Repository) -> Result<WorkingTreeStatus, S
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
     let mut untracked = Vec::new();
+    let mut conflicted = Vec::new();
 
     for entry in statuses.iter() {
         let path = entry.path().unwrap_or("").to_string();
         let s = entry.status();
+
+        // Conflicted changes in index/working tree
+        if s.contains(Status::CONFLICTED) {
+            conflicted.push(FileStatusItem {
+                path: path.clone(),
+                status: "conflicted".to_string(),
+                staged: false,
+            });
+            continue;
+        }
 
         // Staged changes in index
         if s.intersects(
@@ -316,11 +432,348 @@ pub fn get_working_tree_status(repo: &Repository) -> Result<WorkingTreeStatus, S
         }
     }
 
+    let (repo_state, repo_state_label) = get_repository_state_info(repo);
+
     Ok(WorkingTreeStatus {
         staged,
         unstaged,
         untracked,
+        conflicted,
+        repo_state,
+        repo_state_label,
     })
+}
+
+/// Parses Git conflict markers (standard or diff3 format) into structured conflict blocks
+pub fn parse_conflict_blocks(content: &str) -> Vec<ConflictBlock> {
+    let mut blocks = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+
+    enum ParserState {
+        Outside,
+        InOurs {
+            header: String,
+            start_line: usize,
+            lines: Vec<String>,
+        },
+        InBase {
+            header: String,
+            start_line: usize,
+            ours_lines: Vec<String>,
+            base_lines: Vec<String>,
+        },
+        InTheirs {
+            header: String,
+            start_line: usize,
+            ours_lines: Vec<String>,
+            base_lines: Option<Vec<String>>,
+            theirs_lines: Vec<String>,
+        },
+    }
+
+    let mut state = ParserState::Outside;
+    let mut block_id = 0;
+
+    for (idx, line) in lines.iter().enumerate() {
+        match &mut state {
+            ParserState::Outside => {
+                if line.starts_with("<<<<<<<") {
+                    let header = line.trim_start_matches('<').trim().to_string();
+                    state = ParserState::InOurs {
+                        header,
+                        start_line: idx,
+                        lines: Vec::new(),
+                    };
+                }
+            }
+            ParserState::InOurs {
+                header,
+                start_line,
+                lines: ours_lines,
+            } => {
+                if line.starts_with("|||||||") {
+                    state = ParserState::InBase {
+                        header: std::mem::take(header),
+                        start_line: *start_line,
+                        ours_lines: std::mem::take(ours_lines),
+                        base_lines: Vec::new(),
+                    };
+                } else if line.starts_with("=======") {
+                    state = ParserState::InTheirs {
+                        header: std::mem::take(header),
+                        start_line: *start_line,
+                        ours_lines: std::mem::take(ours_lines),
+                        base_lines: None,
+                        theirs_lines: Vec::new(),
+                    };
+                } else {
+                    ours_lines.push(line.to_string());
+                }
+            }
+            ParserState::InBase {
+                header,
+                start_line,
+                ours_lines,
+                base_lines,
+            } => {
+                if line.starts_with("=======") {
+                    state = ParserState::InTheirs {
+                        header: std::mem::take(header),
+                        start_line: *start_line,
+                        ours_lines: std::mem::take(ours_lines),
+                        base_lines: Some(std::mem::take(base_lines)),
+                        theirs_lines: Vec::new(),
+                    };
+                } else {
+                    base_lines.push(line.to_string());
+                }
+            }
+            ParserState::InTheirs {
+                header,
+                start_line,
+                ours_lines,
+                base_lines,
+                theirs_lines,
+            } => {
+                if line.starts_with(">>>>>>>") {
+                    let theirs_header = line.trim_start_matches('>').trim().to_string();
+                    blocks.push(ConflictBlock {
+                        id: block_id,
+                        ours_header: if header.is_empty() {
+                            "Current Change (HEAD)".to_string()
+                        } else {
+                            header.clone()
+                        },
+                        ours_content: ours_lines.join("\n"),
+                        base_content: base_lines.as_ref().map(|b| b.join("\n")),
+                        theirs_content: theirs_lines.join("\n"),
+                        theirs_header: if theirs_header.is_empty() {
+                            "Incoming Change".to_string()
+                        } else {
+                            theirs_header
+                        },
+                        start_line: *start_line,
+                        end_line: idx,
+                    });
+                    block_id += 1;
+                    state = ParserState::Outside;
+                } else {
+                    theirs_lines.push(line.to_string());
+                }
+            }
+        }
+    }
+
+    blocks
+}
+
+/// Inspect a conflicted file: reads working tree content with markers, parses conflict blocks,
+/// and retrieves ancestor (stage 1), ours (stage 2), and theirs (stage 3) blobs from index.
+pub fn get_conflicted_file_details(
+    repo: &Repository,
+    path: &str,
+) -> Result<ConflictFileDetails, String> {
+    let workdir = repo.workdir().ok_or("Bare repository")?;
+    let full_path = workdir.join(path);
+
+    let raw_bytes = if full_path.exists() {
+        std::fs::read(&full_path).map_err(|e| format!("Failed to read file '{path}': {e}"))?
+    } else {
+        Vec::new()
+    };
+
+    let is_binary = raw_bytes.contains(&0);
+    let full_content = if is_binary {
+        String::new()
+    } else {
+        String::from_utf8_lossy(&raw_bytes).to_string()
+    };
+
+    let mut ours_content = None;
+    let mut theirs_content = None;
+    let mut base_content = None;
+
+    if let Ok(index) = repo.index() {
+        let path_obj = Path::new(path);
+        // Stage 1: Ancestor (Base)
+        if let Some(entry) = index.get_path(path_obj, 1) {
+            if let Ok(blob) = repo.find_blob(entry.id) {
+                if !blob.content().contains(&0) {
+                    base_content = Some(String::from_utf8_lossy(blob.content()).to_string());
+                }
+            }
+        }
+        // Stage 2: Ours (HEAD)
+        if let Some(entry) = index.get_path(path_obj, 2) {
+            if let Ok(blob) = repo.find_blob(entry.id) {
+                if !blob.content().contains(&0) {
+                    ours_content = Some(String::from_utf8_lossy(blob.content()).to_string());
+                }
+            }
+        }
+        // Stage 3: Theirs (Incoming)
+        if let Some(entry) = index.get_path(path_obj, 3) {
+            if let Ok(blob) = repo.find_blob(entry.id) {
+                if !blob.content().contains(&0) {
+                    theirs_content = Some(String::from_utf8_lossy(blob.content()).to_string());
+                }
+            }
+        }
+    }
+
+    let blocks = if !is_binary {
+        parse_conflict_blocks(&full_content)
+    } else {
+        Vec::new()
+    };
+
+    let has_conflict_markers = !blocks.is_empty();
+
+    Ok(ConflictFileDetails {
+        path: path.to_string(),
+        full_content,
+        ours_content,
+        theirs_content,
+        base_content,
+        blocks,
+        is_binary,
+        has_conflict_markers,
+    })
+}
+
+/// Computes line-by-line Git blame for a file using libgit2.
+pub fn get_file_blame(repo: &Repository, path: &str) -> Result<FileBlameData, String> {
+    let path_obj = Path::new(path);
+    let workdir = repo.workdir().ok_or("Bare repository")?;
+    let full_path = workdir.join(path_obj);
+
+    // 1. Read file content (from disk or fallback to HEAD commit tree)
+    let raw_bytes = if full_path.exists() {
+        std::fs::read(&full_path).map_err(|e| format!("Failed to read '{path}': {e}"))?
+    } else if let Ok(head) = repo.head().and_then(|h| h.peel_to_commit()) {
+        let tree = head.tree().map_err(|e| e.to_string())?;
+        let entry = tree.get_path(path_obj).map_err(|e| e.to_string())?;
+        let blob = repo.find_blob(entry.id()).map_err(|e| e.to_string())?;
+        blob.content().to_vec()
+    } else {
+        return Err(format!("File '{path}' does not exist on disk or in HEAD commit"));
+    };
+
+    let is_binary = raw_bytes.contains(&0);
+    if is_binary {
+        return Ok(FileBlameData {
+            path: path.to_string(),
+            is_binary: true,
+            lines: Vec::new(),
+            hunks: Vec::new(),
+        });
+    }
+
+    let text = String::from_utf8_lossy(&raw_bytes);
+    let lines: Vec<String> = text.lines().map(String::from).collect();
+
+    // 2. Compute blame hunks with libgit2
+    let mut opts = git2::BlameOptions::new();
+    let blame = repo
+        .blame_file(path_obj, Some(&mut opts))
+        .map_err(|e| format!("Failed to compute blame for '{path}': {e}"))?;
+
+    let mut hunks = Vec::new();
+    let mut commit_cache: HashMap<git2::Oid, String> = HashMap::new();
+
+    for hunk in blame.iter() {
+        let commit_id = hunk.final_commit_id();
+        let summary = commit_cache
+            .entry(commit_id)
+            .or_insert_with(|| {
+                repo.find_commit(commit_id)
+                    .ok()
+                    .and_then(|c| c.summary().map(String::from))
+                    .unwrap_or_else(|| "Initial commit".to_string())
+            })
+            .clone();
+
+        let sig = hunk.final_signature();
+        let author_name = sig.name().unwrap_or("Unknown").to_string();
+        let author_email = sig.email().unwrap_or("").to_string();
+        let timestamp = sig.when().seconds();
+
+        hunks.push(BlameHunkItem {
+            commit_id: commit_id.to_string(),
+            commit_summary: summary,
+            author_name,
+            author_email,
+            timestamp,
+            start_line: hunk.final_start_line(),
+            lines_in_hunk: hunk.lines_in_hunk(),
+        });
+    }
+
+    Ok(FileBlameData {
+        path: path.to_string(),
+        is_binary: false,
+        lines,
+        hunks,
+    })
+}
+
+/// Parses output from `git log --follow --format=%H%x00%an%x00%ae%x00%at%x00%s --shortstat -- <path>`
+pub fn parse_file_history_output(output_str: &str) -> Vec<FileHistoryItem> {
+    let mut items = Vec::new();
+    let lines: Vec<&str> = output_str.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if line.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split('\0').collect();
+        if parts.len() >= 5 {
+            let commit_hash = parts[0].to_string();
+            let author_name = parts[1].to_string();
+            let author_email = parts[2].to_string();
+            let timestamp: i64 = parts[3].parse().unwrap_or(0);
+            let summary = parts[4].to_string();
+
+            let mut additions = 0;
+            let mut deletions = 0;
+
+            if i + 1 < lines.len() {
+                let stat_line = lines[i + 1].trim();
+                if stat_line.contains("file changed") || stat_line.contains("files changed") {
+                    if let Some(ins_idx) = stat_line.find("insertion") {
+                        let prefix = &stat_line[..ins_idx];
+                        if let Some(num_str) = prefix.split_whitespace().last() {
+                            additions = num_str.parse().unwrap_or(0);
+                        }
+                    }
+                    if let Some(del_idx) = stat_line.find("deletion") {
+                        let prefix = &stat_line[..del_idx];
+                        if let Some(num_str) = prefix.split_whitespace().last() {
+                            deletions = num_str.parse().unwrap_or(0);
+                        }
+                    }
+                    i += 1;
+                }
+            }
+
+            items.push(FileHistoryItem {
+                commit_hash,
+                summary,
+                author_name,
+                author_email,
+                timestamp,
+                additions,
+                deletions,
+            });
+        }
+        i += 1;
+    }
+
+    items
 }
 
 /// Add a specific file path to the Git index (staging)
@@ -457,6 +910,139 @@ pub fn stage_hunk(repo: &Repository, patch: &str) -> Result<(), String> {
     index.write().map_err(|e| format!("Failed to write index: {e}"))?;
 
     Ok(())
+}
+
+/// Apply a patch to unstage changes from the index
+pub fn unstage_patch(repo: &Repository, patch: &str) -> Result<(), String> {
+    let diff = Diff::from_buffer(patch.as_bytes())
+        .map_err(|e| format!("Invalid unstage patch: {e}"))?;
+
+    repo.apply(&diff, ApplyLocation::Index, None)
+        .map_err(|e| format!("Failed to apply unstage patch to index: {e}"))?;
+
+    let mut index = repo.index().map_err(|e| format!("Failed to open index: {e}"))?;
+    index.write().map_err(|e| format!("Failed to write index: {e}"))?;
+
+    Ok(())
+}
+
+/// Apply a patch to discard changes from the working directory
+pub fn discard_patch(repo: &Repository, patch: &str) -> Result<(), String> {
+    let diff = Diff::from_buffer(patch.as_bytes())
+        .map_err(|e| format!("Invalid discard patch: {e}"))?;
+
+    repo.apply(&diff, ApplyLocation::WorkDir, None)
+        .map_err(|e| format!("Failed to apply discard patch to working directory: {e}"))?;
+
+    Ok(())
+}
+
+/// Helper to construct a unified diff patch for selected lines within a hunk.
+/// - is_inverse: false for staging unstaged lines into index;
+///               true for unstaging from index or discarding from working tree.
+pub fn build_selected_lines_patch(
+    file_path: &str,
+    hunk: &DiffHunk,
+    selected_indices: &[usize],
+    is_inverse: bool,
+) -> Result<String, String> {
+    let clean_path = file_path.trim_start_matches(['/', '\\']);
+    let mut patch_lines = Vec::new();
+    let mut old_count: u32 = 0;
+    let mut new_count: u32 = 0;
+
+    if !is_inverse {
+        // Forward: Staging unstaged lines into Index
+        for (idx, line) in hunk.lines.iter().enumerate() {
+            let is_selected = selected_indices.contains(&idx);
+            match line.origin {
+                ' ' => {
+                    patch_lines.push(format!(" {}", line.content));
+                    old_count += 1;
+                    new_count += 1;
+                }
+                '-' => {
+                    if is_selected {
+                        patch_lines.push(format!("-{}", line.content));
+                        old_count += 1;
+                    } else {
+                        // Unselected deletion remains in index as context
+                        patch_lines.push(format!(" {}", line.content));
+                        old_count += 1;
+                        new_count += 1;
+                    }
+                }
+                '+' => {
+                    if is_selected {
+                        patch_lines.push(format!("+{}", line.content));
+                        new_count += 1;
+                    } else {
+                        // Unselected addition is omitted from patch
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let start_line = if hunk.old_start > 0 { hunk.old_start } else { 1 };
+        let header = format!("@@ -{},{} +{},{} @@", start_line, old_count, start_line, new_count);
+        let mut patch = format!(
+            "diff --git a/{clean_path} b/{clean_path}\n--- a/{clean_path}\n+++ b/{clean_path}\n{}\n",
+            header
+        );
+        for l in patch_lines {
+            patch.push_str(&l);
+            patch.push('\n');
+        }
+        Ok(patch)
+    } else {
+        // Inverse: Unstaging from Index OR Discarding from Workdir
+        for (idx, line) in hunk.lines.iter().enumerate() {
+            let is_selected = selected_indices.contains(&idx);
+            match line.origin {
+                ' ' => {
+                    patch_lines.push(format!(" {}", line.content));
+                    old_count += 1;
+                    new_count += 1;
+                }
+                '+' => {
+                    if is_selected {
+                        patch_lines.push(format!("-{}", line.content));
+                        old_count += 1;
+                    } else {
+                        patch_lines.push(format!(" {}", line.content));
+                        old_count += 1;
+                        new_count += 1;
+                    }
+                }
+                '-' => {
+                    if is_selected {
+                        patch_lines.push(format!("+{}", line.content));
+                        new_count += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let start_line = if hunk.new_start > 0 {
+            hunk.new_start
+        } else if hunk.old_start > 0 {
+            hunk.old_start
+        } else {
+            1
+        };
+        let header = format!("@@ -{},{} +{},{} @@", start_line, old_count, start_line, new_count);
+        let mut patch = format!(
+            "diff --git a/{clean_path} b/{clean_path}\n--- a/{clean_path}\n+++ b/{clean_path}\n{}\n",
+            header
+        );
+        for l in patch_lines {
+            patch.push_str(&l);
+            patch.push('\n');
+        }
+        Ok(patch)
+    }
 }
 
 /// Helper to construct a synthetic single-hunk diff from content (all added or all deleted)
@@ -2415,6 +3001,181 @@ mod tests {
         let diff_untracked = get_stash_file_diff(&mut repo, 0, "untracked.txt").unwrap();
         assert!(!diff_untracked.hunks.is_empty());
         assert_eq!(diff_untracked.new_path.as_deref(), Some("untracked.txt"));
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_parse_conflict_blocks() {
+        let sample = r#"function greet() {
+<<<<<<< HEAD
+    console.log("Hello from current HEAD");
+=======
+    console.log("Hello from incoming feature");
+>>>>>>> feature-branch
+}
+"#;
+        let blocks = parse_conflict_blocks(sample);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].id, 0);
+        assert_eq!(blocks[0].ours_header, "HEAD");
+        assert_eq!(blocks[0].ours_content, "    console.log(\"Hello from current HEAD\");");
+        assert_eq!(blocks[0].theirs_header, "feature-branch");
+        assert_eq!(blocks[0].theirs_content, "    console.log(\"Hello from incoming feature\");");
+        assert!(blocks[0].base_content.is_none());
+    }
+
+    #[test]
+    fn test_parse_conflict_blocks_diff3() {
+        let sample = r#"function calculate() {
+<<<<<<< HEAD
+    return 42;
+||||||| merged common ancestors
+    return 0;
+=======
+    return 100;
+>>>>>>> incoming-fix
+}
+"#;
+        let blocks = parse_conflict_blocks(sample);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].ours_content, "    return 42;");
+        assert_eq!(blocks[0].base_content.as_deref(), Some("    return 0;"));
+        assert_eq!(blocks[0].theirs_content, "    return 100;");
+        assert_eq!(blocks[0].theirs_header, "incoming-fix");
+    }
+
+    #[test]
+    fn test_conflicted_file_details_and_status() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_conflict_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+
+        let conflict_path = test_dir.join("conflict.txt");
+        let sample_content = "<<<<<<< HEAD\nleft change\n=======\nright change\n>>>>>>> feature\n";
+        std::fs::write(&conflict_path, sample_content).unwrap();
+
+        let details = get_conflicted_file_details(&repo, "conflict.txt").unwrap();
+        assert_eq!(details.path, "conflict.txt");
+        assert!(details.has_conflict_markers);
+        assert_eq!(details.blocks.len(), 1);
+        assert_eq!(details.blocks[0].ours_content, "left change");
+        assert_eq!(details.blocks[0].theirs_content, "right change");
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_parse_file_history_output() {
+        let sample = "abc123456789\0Alice Smith\0alice@example.com\01700000000\0feat: initial commit\n 1 file changed, 10 insertions(+), 2 deletions(-)\n";
+        let history = parse_file_history_output(sample);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].commit_hash, "abc123456789");
+        assert_eq!(history[0].author_name, "Alice Smith");
+        assert_eq!(history[0].author_email, "alice@example.com");
+        assert_eq!(history[0].timestamp, 1700000000);
+        assert_eq!(history[0].summary, "feat: initial commit");
+        assert_eq!(history[0].additions, 10);
+        assert_eq!(history[0].deletions, 2);
+    }
+
+    #[test]
+    fn test_get_file_blame() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_blame_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+
+        let file_path = test_dir.join("code.rs");
+        std::fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n").unwrap();
+
+        // Commit file so blame has commit history
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("code.rs")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("Shark Dev", "dev@gitshark.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial code commit", &tree, &[]).unwrap();
+
+        let blame_data = get_file_blame(&repo, "code.rs").unwrap();
+        assert_eq!(blame_data.path, "code.rs");
+        assert!(!blame_data.is_binary);
+        assert_eq!(blame_data.lines.len(), 3);
+        assert!(!blame_data.hunks.is_empty());
+        assert_eq!(blame_data.hunks[0].author_name, "Shark Dev");
+        assert_eq!(blame_data.hunks[0].commit_summary, "Initial code commit");
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_stage_and_discard_selected_lines() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_lines_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+
+        let file_path = test_dir.join("lines.txt");
+        std::fs::write(&file_path, "line 1\nline 2\nline 3\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("lines.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = git2::Signature::now("Shark Dev", "dev@gitshark.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+
+        // Now modify lines.txt: line 2 is replaced with line 2 mod A and line 2 mod B
+        std::fs::write(&file_path, "line 1\nline 2 mod A\nline 2 mod B\nline 3\n").unwrap();
+
+        // Get diff
+        let diff_data = get_file_diff(&repo, "lines.txt", false).unwrap();
+        assert_eq!(diff_data.hunks.len(), 1);
+        let hunk = &diff_data.hunks[0];
+
+        // Find index of "+line 2 mod A" and "-line 2"
+        let del_idx = hunk.lines.iter().position(|l| l.origin == '-' && l.content == "line 2").unwrap();
+        let add_a_idx = hunk.lines.iter().position(|l| l.origin == '+' && l.content == "line 2 mod A").unwrap();
+        let _add_b_idx = hunk.lines.iter().position(|l| l.origin == '+' && l.content == "line 2 mod B").unwrap();
+
+        // Stage ONLY "-line 2" and "+line 2 mod A", but NOT "+line 2 mod B"
+        let patch = build_selected_lines_patch("lines.txt", hunk, &[del_idx, add_a_idx], false).unwrap();
+        stage_hunk(&repo, &patch).unwrap();
+
+        // Check index diff (HEAD vs Index): should have line 2 replaced with line 2 mod A
+        let staged_diff = get_file_diff(&repo, "lines.txt", true).unwrap();
+        assert_eq!(staged_diff.total_additions, 1);
+        assert_eq!(staged_diff.total_deletions, 1);
+
+        // Test unstaging: unstage the changes from index
+        let staged_hunk = &staged_diff.hunks[0];
+        let unstage_indices: Vec<usize> = (0..staged_hunk.lines.len()).collect();
+        let unstage_patch_str = build_selected_lines_patch("lines.txt", staged_hunk, &unstage_indices, true).unwrap();
+        unstage_patch(&repo, &unstage_patch_str).unwrap();
+
+        let after_unstage = get_file_diff(&repo, "lines.txt", true).unwrap();
+        assert_eq!(after_unstage.total_additions, 0);
+        assert_eq!(after_unstage.total_deletions, 0);
+
+        // Re-stage "-line 2" and "+line 2 mod A"
+        let re_patch = build_selected_lines_patch("lines.txt", hunk, &[del_idx, add_a_idx], false).unwrap();
+        stage_hunk(&repo, &re_patch).unwrap();
+
+        // Check unstaged diff (Index vs Workdir): should have only "+line 2 mod B" remaining unstaged
+        let unstaged_diff = get_file_diff(&repo, "lines.txt", false).unwrap();
+        assert_eq!(unstaged_diff.total_additions, 1);
+        assert_eq!(unstaged_diff.total_deletions, 0);
+
+        // Now test discard on remaining unstaged line "+line 2 mod B"
+        let remaining_hunk = &unstaged_diff.hunks[0];
+        let remaining_b_idx = remaining_hunk.lines.iter().position(|l| l.origin == '+' && l.content == "line 2 mod B").unwrap();
+        let discard_patch_str = build_selected_lines_patch("lines.txt", remaining_hunk, &[remaining_b_idx], true).unwrap();
+        discard_patch(&repo, &discard_patch_str).unwrap();
+
+        // Workdir should now match index perfectly (0 unstaged changes)
+        let final_unstaged = get_file_diff(&repo, "lines.txt", false).unwrap();
+        assert_eq!(final_unstaged.total_additions, 0);
+        assert_eq!(final_unstaged.total_deletions, 0);
+
+        let final_content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(final_content, "line 1\nline 2 mod A\nline 3\n");
 
         let _ = fs::remove_dir_all(&test_dir);
     }

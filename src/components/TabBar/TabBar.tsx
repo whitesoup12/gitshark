@@ -1,11 +1,12 @@
 import React from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { TabItem } from "./TabItem";
-import { Terminal as TerminalIcon, Download, Globe, GitPullRequest } from "lucide-react";
+import { Terminal as TerminalIcon, Download, Globe, GitPullRequest, Search } from "lucide-react";
 import { SyncButton } from "./SyncButton";
 import { OpenRepoDropdown } from "./OpenRepoDropdown";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { useSharkStore, computeSharkRank } from "@/store/useSharkStore";
+import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { openInBrowserIpc } from "@/lib/ipc";
 
 export const TabBar: React.FC = () => {
@@ -75,6 +76,19 @@ export const TabBar: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Middle: Command Palette Quick Search Launcher */}
+      <button
+        onClick={() => useCommandPaletteStore.getState().open()}
+        className="hidden md:flex items-center gap-2 h-7 px-2.5 rounded-md bg-shark-900/90 hover:bg-shark-850 border border-shark-800 hover:border-shark-700 text-slate-400 hover:text-slate-200 transition-all text-xs mx-2 shadow-sm"
+        title="Open Command Palette (Cmd+K / Ctrl+P)"
+      >
+        <Search className="w-3.5 h-3.5 text-sky-400" />
+        <span className="text-[11px] text-slate-400 font-normal">Search or jump to...</span>
+        <kbd className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-shark-800 border border-shark-700 text-slate-400">
+          ⌘K
+        </kbd>
+      </button>
 
       {/* Right side: Global utility toggles for active tab */}
       {activeTab && (
