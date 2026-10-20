@@ -2,8 +2,8 @@ cask "gitshark" do
   arch arm: "aarch64", intel: "x64"
 
   version "1.6.0"
-  sha256 arm:   "400bc69ea4351c07c2a5f391c557ff12204f0592cf7f6850d9a2618492273239",
-         intel: "4d3f179daeed347b27424569ba2277377f1bfeac37155df25d3a99680716e1c7"
+  sha256 arm:   "650941034c3180fe842c27f44b8fc437440578fb6818619fd3066b36bec73448",
+         intel: "3506930abb731f077d914c962b886ce7d40ba8128ac8daccac5f45b7b350987c"
 
   url "https://github.com/whitesoup12/gitshark/releases/download/v#{version}/GitShark_#{version}_#{arch}.dmg"
   name "GitShark"
