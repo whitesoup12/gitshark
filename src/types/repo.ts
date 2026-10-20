@@ -13,6 +13,9 @@ export interface RepoMetadata {
   staged_count: number;
   unstaged_count: number;
   untracked_count: number;
+  conflicted_count?: number;
+  repo_state?: string;
+  repo_state_label?: string | null;
   remote_url?: string | null;
 }
 

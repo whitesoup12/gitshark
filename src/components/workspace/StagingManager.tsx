@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FileStatusItem, WorkingTreeStatus, Tab } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useBlameStore } from "@/store/useBlameStore";
 import { showConfirm } from "@/store/useDialogStore";
+import { resolveConflictChoiceIpc } from "@/lib/ipc";
 import {
   Plus,
   Minus,
@@ -14,6 +16,8 @@ import {
   Loader2,
   ArrowUp,
   Archive,
+  AlertTriangle,
+  History,
 } from "lucide-react";
 
 interface StagingManagerProps {
@@ -166,11 +170,19 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
   const isCommitting = tab?.hookState?.status === "running";
   const isHookPushing = tab?.hookState?.status === "running" && tab?.hookState?.lastCommand === "push";
   const effectivePushing = isPushing || isHookPushing;
+  const conflictedCount = status.conflicted?.length || 0;
   const stagedCount = status.staged.length;
   const unstagedCount = status.unstaged.length;
 
   const untrackedCount = status.untracked.length;
   const totalUnstaged = unstagedCount + untrackedCount;
+
+  // Auto-fill merge commit summary if in merge state and empty
+  useEffect(() => {
+    if (status.repo_state === "merge" && status.repo_state_label && !commitSummary) {
+      setCommitSummary(status.repo_state_label);
+    }
+  }, [status.repo_state, status.repo_state_label]);
 
   const confirmAndDiscardFile = async (filePath: string) => {
     const confirmed = await showConfirm({
@@ -206,7 +218,10 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
     let badgeText = "M";
     let badgeColor = "bg-amber-950 text-amber-400 border-amber-800/60";
 
-    if (item.status === "new" || item.status === "untracked") {
+    if (item.status === "conflicted") {
+      badgeText = "!";
+      badgeColor = "bg-rose-950 text-rose-300 border-rose-700/80 font-bold shadow-sm";
+    } else if (item.status === "new" || item.status === "untracked") {
       badgeText = "A";
       badgeColor = "bg-emerald-950 text-emerald-400 border-emerald-800/60";
     } else if (item.status === "deleted") {
@@ -224,7 +239,12 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
     return (
       <div
-        key={`${isStaged ? "staged" : "unstaged"}-${item.path}`}
+        key={`${item.status === "conflicted" ? "conflicted" : isStaged ? "staged" : "unstaged"}-${item.path}`}
+        ref={(el) => {
+          if (isSelected && el) {
+            el.scrollIntoView({ block: "nearest" });
+          }
+        }}
         onClick={() => onSelectFile(item.path, isStaged)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -238,7 +258,11 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
         }}
         className={`group flex items-center justify-between px-2.5 py-1.5 text-xs rounded transition-colors cursor-pointer select-none ${
           isSelected
-            ? "bg-sky-500/15 text-sky-200 border-l-2 border-sky-400 font-medium"
+            ? item.status === "conflicted"
+              ? "bg-rose-500/20 text-rose-200 border-l-2 border-rose-400 font-medium"
+              : "bg-sky-500/15 text-sky-200 border-l-2 border-sky-400 font-medium"
+            : item.status === "conflicted"
+            ? "hover:bg-rose-950/40 text-rose-200/90 border-l-2 border-transparent"
             : "hover:bg-shark-800/70 text-slate-300 border-l-2 border-transparent"
         }`}
       >
@@ -256,7 +280,34 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
         {/* Hover Action Buttons */}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isStaged ? (
+          {item.status === "conflicted" ? (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!tab?.repoId) return;
+                  await resolveConflictChoiceIpc(tab.repoId, item.path, "ours");
+                  onRefresh();
+                }}
+                className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-800 text-cyan-200 font-medium transition-colors"
+                title="Accept Current (Ours)"
+              >
+                Ours
+              </button>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!tab?.repoId) return;
+                  await resolveConflictChoiceIpc(tab.repoId, item.path, "theirs");
+                  onRefresh();
+                }}
+                className="px-1.5 py-0.5 rounded text-[10px] bg-purple-950/90 hover:bg-purple-900 border border-purple-800 text-purple-200 font-medium transition-colors"
+                title="Accept Incoming (Theirs)"
+              >
+                Theirs
+              </button>
+            </div>
+          ) : isStaged ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -297,8 +348,10 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
   };
 
   const handleCommit = async () => {
-    if (!tab || isCommitting) return;
-    const summary = commitSummary.trim();
+    if (!tab || isCommitting || conflictedCount > 0) return;
+    const summary =
+      commitSummary.trim() ||
+      (status.repo_state === "merge" ? status.repo_state_label || "Merge commit" : "");
     const desc = commitDescription.trim();
     if (!isAmend && stagedCount === 0) return;
     if (!isAmend && !summary) return;
@@ -437,6 +490,27 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
       {/* Split Container for Staged and Unstaged Files */}
       <div ref={containerRef} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Conflicted Files Drawer Section (if any) */}
+        {conflictedCount > 0 && (
+          <div className="flex flex-col flex-shrink-0 max-h-48 border-b border-rose-900/60 bg-rose-950/20">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-rose-950/60 border-b border-rose-900/50 text-[11px] font-semibold text-rose-300 select-none">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                <span>Conflicted Files</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-900/80 border border-rose-750 text-rose-200 font-mono">
+                  {conflictedCount}
+                </span>
+              </div>
+              <span className="text-[10px] text-rose-400 font-normal">
+                Click to resolve
+              </span>
+            </div>
+            <div className="overflow-y-auto p-1.5 space-y-0.5">
+              {status.conflicted?.map((f) => renderFileRow(f, false))}
+            </div>
+          </div>
+        )}
+
         {/* Top Panel: Staged Changes */}
         <div
           style={{ height: `${splitRatio}%` }}
@@ -603,6 +677,14 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           />
         </div>
 
+        {/* Conflict Warning Banner */}
+        {conflictedCount > 0 && (
+          <div className="flex items-center gap-2 p-2 rounded bg-rose-950/60 border border-rose-800 text-[11px] text-rose-300">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-rose-400" />
+            <span>Resolve {conflictedCount} conflicted {conflictedCount === 1 ? "file" : "files"} to commit</span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none hover:text-slate-200">
             <input
@@ -619,8 +701,9 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
             onClick={handleCommit}
             disabled={
               isCommitting ||
+              conflictedCount > 0 ||
               (!isAmend && stagedCount === 0) ||
-              (!isAmend && !commitSummary.trim())
+              (!isAmend && !commitSummary.trim() && !(status.repo_state === "merge" && status.repo_state_label))
             }
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:hover:bg-sky-600 text-white font-medium text-xs shadow transition-colors"
           >
@@ -633,7 +716,11 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
               <>
                 <GitCommit className="w-3.5 h-3.5" />
                 <span>
-                  {isAmend ? "Amend Commit" : `Commit (${stagedCount})`}
+                  {isAmend
+                    ? "Amend Commit"
+                    : status.repo_state === "merge"
+                    ? `Complete Merge (${stagedCount})`
+                    : `Commit (${stagedCount})`}
                 </span>
               </>
             )}
@@ -686,7 +773,51 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           className="fixed z-50 w-56 bg-shark-900/95 border border-shark-750/90 rounded-lg shadow-2xl py-1 text-xs text-slate-200 select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
           onClick={(e) => e.stopPropagation()}
         >
-          {contextMenu.item && !contextMenu.isStaged && (
+          {contextMenu.item?.status === "conflicted" && (
+            <>
+              <div className="px-3 py-1 text-[10px] font-mono text-rose-300 border-b border-shark-800 truncate bg-rose-950/40">
+                {contextMenu.item.path} (Conflicted)
+              </div>
+              <button
+                onClick={() => {
+                  onSelectFile(contextMenu.item!.path, false);
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-left transition-colors"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                <span>Open in Conflict Resolver</span>
+              </button>
+              <button
+                onClick={async () => {
+                  if (tab?.repoId) {
+                    await resolveConflictChoiceIpc(tab.repoId, contextMenu.item!.path, "ours");
+                    onRefresh();
+                  }
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-cyan-950/40 text-cyan-300 text-left transition-colors"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Accept Current (Ours)</span>
+              </button>
+              <button
+                onClick={async () => {
+                  if (tab?.repoId) {
+                    await resolveConflictChoiceIpc(tab.repoId, contextMenu.item!.path, "theirs");
+                    onRefresh();
+                  }
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-purple-950/40 text-purple-300 text-left transition-colors"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-purple-400" />
+                <span>Accept Incoming (Theirs)</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.item && contextMenu.item.status !== "conflicted" && !contextMenu.isStaged && (
             <>
               <div className="px-3 py-1 text-[10px] font-mono text-slate-400 border-b border-shark-800 truncate bg-shark-950/40">
                 {contextMenu.item.path}
@@ -715,7 +846,7 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
             </>
           )}
 
-          {contextMenu.item && contextMenu.isStaged && (
+          {contextMenu.item && contextMenu.item.status !== "conflicted" && contextMenu.isStaged && (
             <>
               <div className="px-3 py-1 text-[10px] font-mono text-slate-400 border-b border-shark-800 truncate bg-shark-950/40">
                 {contextMenu.item.path}
@@ -729,6 +860,39 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
               >
                 <Minus className="w-3.5 h-3.5 text-slate-400" />
                 <span>Unstage File</span>
+              </button>
+            </>
+          )}
+
+          {/* Inspect Blame & File History options on any file item */}
+          {contextMenu.item && tab?.repoId && (
+            <>
+              <div className="my-1 border-t border-shark-800" />
+              <button
+                onClick={() => {
+                  const p = contextMenu.item!.path;
+                  setContextMenu(null);
+                  useBlameStore
+                    .getState()
+                    .openBlame(tab.repoId!, p, tab.id, "blame");
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-left transition-colors text-xs text-slate-300"
+              >
+                <FileText className="w-3.5 h-3.5 text-sky-400" />
+                <span>Inspect Blame</span>
+              </button>
+              <button
+                onClick={() => {
+                  const p = contextMenu.item!.path;
+                  setContextMenu(null);
+                  useBlameStore
+                    .getState()
+                    .openBlame(tab.repoId!, p, tab.id, "history");
+                }}
+                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-indigo-600/20 hover:text-indigo-300 text-left transition-colors text-xs text-slate-300"
+              >
+                <History className="w-3.5 h-3.5 text-indigo-400" />
+                <span>View File History</span>
               </button>
             </>
           )}

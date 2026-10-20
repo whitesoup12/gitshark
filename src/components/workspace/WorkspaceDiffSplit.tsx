@@ -1,8 +1,12 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { Tab, WorkingTreeStatus, FileDiff } from "@/types";
+import { Tab, WorkingTreeStatus, FileDiff, DiffHunk } from "@/types";
 import { StagingManager } from "./StagingManager";
 import { DiffViewer } from "@/components/diff/DiffViewer";
+import { ConflictResolver } from "@/components/conflict/ConflictResolver";
+import { RepoOperationBanner } from "@/components/conflict/RepoOperationBanner";
 import { useSharkStore } from "@/store/useSharkStore";
+import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { showConfirm } from "@/store/useDialogStore";
 import {
   getWorkingTreeStatusIpc,
   stageFileIpc,
@@ -10,6 +14,11 @@ import {
   stageAllFilesIpc,
   unstageAllFilesIpc,
   stageHunkIpc,
+  unstageHunkIpc,
+  discardHunkIpc,
+  stageSelectedLinesIpc,
+  unstageSelectedLinesIpc,
+  discardSelectedLinesIpc,
   discardFileChangesIpc,
   discardAllUnstagedChangesIpc,
   getFileDiffIpc,
@@ -26,12 +35,25 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     unstaged: [],
     untracked: [],
   });
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(
+    tab.selectedFilePath || null
+  );
   const [selectedFileStaged, setSelectedFileStaged] = useState<boolean>(false);
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [isRefreshingDiff, setIsRefreshingDiff] = useState(false);
+
+  const { updateTab } = useWorkspaceStore();
+
+  // Sync if tab.selectedFilePath changes externally (e.g. from Command Palette)
+  useEffect(() => {
+    if (tab.selectedFilePath) {
+      setSelectedFilePath(tab.selectedFilePath);
+      const isStaged = status.staged.some((f) => f.path === tab.selectedFilePath);
+      setSelectedFileStaged(isStaged);
+    }
+  }, [tab.selectedFilePath, status.staged]);
 
   // 1. Fetch working directory status
   const loadStatus = useCallback(async (silent = false) => {
@@ -45,32 +67,33 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
 
       // If no file currently selected or previously selected file was removed, auto-select first available file
       setSelectedFilePath((prev) => {
-        if (!prev) {
-          const firstUnstaged = currentStatus.unstaged[0] || currentStatus.untracked[0];
-          if (firstUnstaged) {
+        const preferred = tab.selectedFilePath || prev;
+
+        if (preferred) {
+          const inConflicted = currentStatus.conflicted?.some((f) => f.path === preferred);
+          const inStaged = currentStatus.staged.some((f) => f.path === preferred);
+          const inUnstaged =
+            currentStatus.unstaged.some((f) => f.path === preferred) ||
+            currentStatus.untracked.some((f) => f.path === preferred);
+
+          if (inConflicted) {
             setSelectedFileStaged(false);
-            return firstUnstaged.path;
+            return preferred;
           }
-          const firstStaged = currentStatus.staged[0];
-          if (firstStaged) {
+          if (inStaged) {
             setSelectedFileStaged(true);
-            return firstStaged.path;
+            return preferred;
           }
-          return null;
+          if (inUnstaged) {
+            setSelectedFileStaged(false);
+            return preferred;
+          }
         }
 
-        const existsInUnstaged =
-          currentStatus.unstaged.some((f) => f.path === prev) ||
-          currentStatus.untracked.some((f) => f.path === prev);
-        const existsInStaged = currentStatus.staged.some((f) => f.path === prev);
-
-        if (existsInUnstaged) {
+        // Prioritize conflicted files
+        if (currentStatus.conflicted && currentStatus.conflicted.length > 0) {
           setSelectedFileStaged(false);
-          return prev;
-        }
-        if (existsInStaged) {
-          setSelectedFileStaged(true);
-          return prev;
+          return currentStatus.conflicted[0].path;
         }
 
         const firstUnstaged = currentStatus.unstaged[0] || currentStatus.untracked[0];
@@ -78,11 +101,13 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
           setSelectedFileStaged(false);
           return firstUnstaged.path;
         }
+
         const firstStaged = currentStatus.staged[0];
         if (firstStaged) {
           setSelectedFileStaged(true);
           return firstStaged.path;
         }
+
         return null;
       });
     } catch (err) {
@@ -256,6 +281,55 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     await loadDiff();
   };
 
+  const handleUnstageHunk = async (hunk: DiffHunk) => {
+    if (!tab.repoId || !selectedFilePath) return;
+    await unstageHunkIpc(tab.repoId, selectedFilePath, hunk);
+    await loadStatus();
+    await loadDiff();
+  };
+
+  const handleDiscardHunk = async (hunk: DiffHunk) => {
+    if (!tab.repoId || !selectedFilePath) return;
+    const ok = await showConfirm({
+      title: "Discard Hunk Changes",
+      message: "Are you sure you want to discard this hunk? Unsaved modifications will be permanently lost.",
+      confirmText: "Discard Hunk",
+      variant: "danger",
+    });
+    if (!ok) return;
+    await discardHunkIpc(tab.repoId, selectedFilePath, hunk);
+    await loadStatus();
+    await loadDiff();
+  };
+
+  const handleStageLines = async (hunk: DiffHunk, lineIndices: number[]) => {
+    if (!tab.repoId || !selectedFilePath) return;
+    await stageSelectedLinesIpc(tab.repoId, selectedFilePath, hunk, lineIndices);
+    await loadStatus();
+    await loadDiff();
+  };
+
+  const handleUnstageLines = async (hunk: DiffHunk, lineIndices: number[]) => {
+    if (!tab.repoId || !selectedFilePath) return;
+    await unstageSelectedLinesIpc(tab.repoId, selectedFilePath, hunk, lineIndices);
+    await loadStatus();
+    await loadDiff();
+  };
+
+  const handleDiscardLines = async (hunk: DiffHunk, lineIndices: number[]) => {
+    if (!tab.repoId || !selectedFilePath) return;
+    const ok = await showConfirm({
+      title: "Discard Selected Lines",
+      message: `Are you sure you want to discard ${lineIndices.length} selected line(s)? This action cannot be undone.`,
+      confirmText: "Discard Lines",
+      variant: "danger",
+    });
+    if (!ok) return;
+    await discardSelectedLinesIpc(tab.repoId, selectedFilePath, hunk, lineIndices);
+    await loadStatus();
+    await loadDiff();
+  };
+
   const handleToggleStageFile = () => {
     if (!selectedFilePath) return;
     if (selectedFileStaged) {
@@ -265,38 +339,70 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     }
   };
 
+  const isSelectedFileConflicted = Boolean(
+    selectedFilePath &&
+      status.conflicted?.some((f) => f.path === selectedFilePath)
+  );
+
   return (
-    <div className="flex-1 flex overflow-hidden w-full h-full">
-      {/* Left Drawer: Working Directory Staging List */}
-      <StagingManager
+    <div className="flex-1 flex flex-col overflow-hidden w-full h-full">
+      {/* Top Lifecycle Operation Banner (if in merge/rebase/etc. or has conflicts) */}
+      <RepoOperationBanner
         tab={tab}
         status={status}
-        selectedFilePath={selectedFilePath}
-        selectedFileStaged={selectedFileStaged}
-        onSelectFile={(path, staged) => {
-          setSelectedFilePath(path);
-          setSelectedFileStaged(staged);
-        }}
-        onStageFile={handleStageFile}
-        onUnstageFile={handleUnstageFile}
-        onStageAll={handleStageAll}
-        onUnstageAll={handleUnstageAll}
-        onDiscardFile={handleDiscardFile}
-        onDiscardAll={handleDiscardAll}
         onRefresh={loadStatus}
-        isLoading={isLoadingStatus}
       />
 
-      {/* Right Pane: Interactive Diff Viewer */}
-      <DiffViewer
-        diff={diff}
-        filePath={selectedFilePath}
-        isStaged={selectedFileStaged}
-        onStageHunk={handleStageHunk}
-        onToggleStageFile={handleToggleStageFile}
-        isLoading={isLoadingDiff}
-        isRefreshing={isRefreshingDiff}
-      />
+      <div className="flex-1 flex overflow-hidden w-full min-h-0">
+        {/* Left Drawer: Working Directory Staging List */}
+        <StagingManager
+          tab={tab}
+          status={status}
+          selectedFilePath={selectedFilePath}
+          selectedFileStaged={selectedFileStaged}
+          onSelectFile={(path, staged) => {
+            setSelectedFilePath(path);
+            setSelectedFileStaged(staged);
+            updateTab(tab.id, { selectedFilePath: path });
+          }}
+          onStageFile={handleStageFile}
+          onUnstageFile={handleUnstageFile}
+          onStageAll={handleStageAll}
+          onUnstageAll={handleUnstageAll}
+          onDiscardFile={handleDiscardFile}
+          onDiscardAll={handleDiscardAll}
+          onRefresh={loadStatus}
+          isLoading={isLoadingStatus}
+        />
+
+        {/* Right Pane: Interactive Conflict Resolver OR Diff Viewer */}
+        {isSelectedFileConflicted && selectedFilePath ? (
+          <ConflictResolver
+            tab={tab}
+            filePath={selectedFilePath}
+            onResolved={async () => {
+              await loadStatus();
+            }}
+          />
+        ) : (
+          <DiffViewer
+            diff={diff}
+            filePath={selectedFilePath}
+            isStaged={selectedFileStaged}
+            onStageHunk={handleStageHunk}
+            onUnstageHunk={handleUnstageHunk}
+            onDiscardHunk={handleDiscardHunk}
+            onStageLines={handleStageLines}
+            onUnstageLines={handleUnstageLines}
+            onDiscardLines={handleDiscardLines}
+            onToggleStageFile={handleToggleStageFile}
+            isLoading={isLoadingDiff}
+            isRefreshing={isRefreshingDiff}
+            repoId={tab.repoId}
+            tabId={tab.id}
+          />
+        )}
+      </div>
     </div>
   );
 };

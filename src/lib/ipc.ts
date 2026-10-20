@@ -14,9 +14,13 @@ import type {
   StashItem,
   StashDetails,
   FileDiff,
+  DiffHunk,
   CommitDetails,
   GitTagItem,
   GitBinaryInfo,
+  ConflictFileDetails,
+  FileBlameData,
+  FileHistoryItem,
 } from "@/types";
 import { showPrompt } from "@/store/useDialogStore";
 
@@ -434,6 +438,99 @@ export async function stageHunkIpc(repoId: string, patch: string): Promise<void>
     return;
   }
   return await invoke<void>("stage_hunk", { repoId, patch });
+}
+
+/**
+ * Unstage an individual diff hunk from the index
+ */
+export async function unstageHunkIpc(
+  repoId: string,
+  filePath: string,
+  hunk: DiffHunk
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Unstage hunk for ${filePath}`);
+    return;
+  }
+  return await invoke<void>("unstage_hunk", { repoId, filePath, hunk });
+}
+
+/**
+ * Discard an individual diff hunk from the working directory
+ */
+export async function discardHunkIpc(
+  repoId: string,
+  filePath: string,
+  hunk: DiffHunk
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Discard hunk for ${filePath}`);
+    return;
+  }
+  return await invoke<void>("discard_hunk", { repoId, filePath, hunk });
+}
+
+/**
+ * Stage specific selected line indices within a hunk into the index
+ */
+export async function stageSelectedLinesIpc(
+  repoId: string,
+  filePath: string,
+  hunk: DiffHunk,
+  selectedIndices: number[]
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Stage lines ${selectedIndices} for ${filePath}`);
+    return;
+  }
+  return await invoke<void>("stage_selected_lines", {
+    repoId,
+    filePath,
+    hunk,
+    selectedIndices,
+  });
+}
+
+/**
+ * Unstage specific selected line indices within a hunk from the index
+ */
+export async function unstageSelectedLinesIpc(
+  repoId: string,
+  filePath: string,
+  hunk: DiffHunk,
+  selectedIndices: number[]
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Unstage lines ${selectedIndices} for ${filePath}`);
+    return;
+  }
+  return await invoke<void>("unstage_selected_lines", {
+    repoId,
+    filePath,
+    hunk,
+    selectedIndices,
+  });
+}
+
+/**
+ * Discard specific selected line indices within a hunk from the working tree
+ */
+export async function discardSelectedLinesIpc(
+  repoId: string,
+  filePath: string,
+  hunk: DiffHunk,
+  selectedIndices: number[]
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] Discard lines ${selectedIndices} for ${filePath}`);
+    return;
+  }
+  return await invoke<void>("discard_selected_lines", {
+    repoId,
+    filePath,
+    hunk,
+    selectedIndices,
+  });
 }
 
 /**
@@ -1463,6 +1560,149 @@ export async function saveOpenReposIpc(session: OpenReposSession): Promise<void>
   }
 
   return await invoke<void>("save_open_repos", { session });
+}
+
+/**
+ * Fetch detailed conflict information for a conflicted file
+ */
+export async function getConflictedFileDetailsIpc(
+  repoId: string,
+  path: string
+): Promise<ConflictFileDetails> {
+  if (!isTauriEnvironment()) {
+    return {
+      path,
+      full_content: `<<<<<<< HEAD\n// Our changes\n=======\n// Their changes\n>>>>>>> incoming`,
+      blocks: [
+        {
+          id: 0,
+          ours_header: "HEAD",
+          ours_content: "// Our changes",
+          theirs_content: "// Their changes",
+          theirs_header: "incoming",
+          start_line: 0,
+          end_line: 4,
+        },
+      ],
+      is_binary: false,
+      has_conflict_markers: true,
+    };
+  }
+  return await invoke<ConflictFileDetails>("get_conflicted_file_details", {
+    repoId,
+    path,
+  });
+}
+
+/**
+ * Resolve a conflicted file entirely using either 'ours' (HEAD) or 'theirs' (incoming)
+ */
+export async function resolveConflictChoiceIpc(
+  repoId: string,
+  path: string,
+  choice: "ours" | "theirs"
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] resolveConflictChoice: ${path} (${choice})`);
+    return;
+  }
+  return await invoke<void>("resolve_conflict_choice", {
+    repoId,
+    path,
+    choice,
+  });
+}
+
+/**
+ * Write resolved conflict content to disk and stage the file
+ */
+export async function saveAndStageResolvedFileIpc(
+  repoId: string,
+  path: string,
+  content: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] saveAndStageResolvedFile: ${path}`);
+    return;
+  }
+  return await invoke<void>("save_and_stage_resolved_file", {
+    repoId,
+    path,
+    content,
+  });
+}
+
+/**
+ * Abort active merge, rebase, cherry-pick, or revert operation
+ */
+export async function abortRepoOperationIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] abortRepoOperation: ${repoId}`);
+    return;
+  }
+  return await invoke<void>("abort_repo_operation", { repoId });
+}
+
+/**
+ * Continue active merge, rebase, cherry-pick, or revert operation
+ */
+export async function continueRepoOperationIpc(repoId: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] continueRepoOperation: ${repoId}`);
+    return;
+  }
+  return await invoke<void>("continue_repo_operation", { repoId });
+}
+
+/**
+ * Fetch line-by-line Git blame for a file using native libgit2
+ */
+export async function getFileBlameIpc(
+  repoId: string,
+  path: string
+): Promise<FileBlameData> {
+  if (!isTauriEnvironment()) {
+    return {
+      path,
+      is_binary: false,
+      lines: ["// Simulated blame line 1", "// Simulated blame line 2"],
+      hunks: [
+        {
+          commit_id: "abcdef1234567890",
+          commit_summary: "Initial commit",
+          author_name: "Mock Developer",
+          author_email: "dev@gitshark.com",
+          timestamp: Math.floor(Date.now() / 1000) - 3600,
+          start_line: 1,
+          lines_in_hunk: 2,
+        },
+      ],
+    };
+  }
+  return await invoke<FileBlameData>("get_file_blame", { repoId, path });
+}
+
+/**
+ * Fetch chronological commit history that modified a file
+ */
+export async function getFileHistoryIpc(
+  repoId: string,
+  path: string
+): Promise<FileHistoryItem[]> {
+  if (!isTauriEnvironment()) {
+    return [
+      {
+        commit_hash: "abcdef1234567890",
+        summary: "Initial commit",
+        author_name: "Mock Developer",
+        author_email: "dev@gitshark.com",
+        timestamp: Math.floor(Date.now() / 1000) - 3600,
+        additions: 10,
+        deletions: 2,
+      },
+    ];
+  }
+  return await invoke<FileHistoryItem[]>("get_file_history", { repoId, path });
 }
 
 

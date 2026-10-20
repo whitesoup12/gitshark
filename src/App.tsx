@@ -9,6 +9,9 @@ import { CloneWizardModal } from "@/components/Clone/CloneWizardModal";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { SharkCelebrationOverlay, SharkWisdomModal } from "@/components/common/SharkCompanion";
 import { GlobalDialogHost } from "@/components/common/GlobalDialogHost";
+import { CommandPaletteModal } from "@/components/palette/CommandPaletteModal";
+import { FileBlameModal } from "@/components/blame/FileBlameModal";
+import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId, initWorkspaceSession } = useWorkspaceStore();
@@ -26,6 +29,16 @@ export const App: React.FC = () => {
   // Global keyboard shortcuts: Ctrl+, / Cmd+, for Settings, Escape to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Command Palette: Cmd+K / Ctrl+K, or Cmd+P / Ctrl+P
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === "k" || (e.key.toLowerCase() === "p" && !e.shiftKey))
+      ) {
+        e.preventDefault();
+        useCommandPaletteStore.getState().toggle();
+        return;
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key === ",") {
         e.preventDefault();
         if (isSettingsOpen) {
@@ -78,6 +91,12 @@ export const App: React.FC = () => {
 
       {/* Global Dialog Host for styled alerts, confirms, and prompts */}
       <GlobalDialogHost />
+
+      {/* Global Keyboard-Driven Command Palette */}
+      <CommandPaletteModal />
+
+      {/* Global Interactive Blame & File History Inspector */}
+      <FileBlameModal />
     </div>
   );
 };
