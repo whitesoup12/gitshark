@@ -2,39 +2,26 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 
 const rootDir = process.cwd();
-const gitHooksDir = path.join(rootDir, ".git", "hooks");
+const githooksDir = path.join(rootDir, ".githooks");
 
-if (!fs.existsSync(gitHooksDir)) {
-  console.log("ℹ No .git/hooks directory found (bare repo or shallow clone). Skipping hook installation.");
-  process.exit(0);
+// 1. Configure Git to use version-controlled .githooks directory
+try {
+  execSync("git config core.hooksPath .githooks", { stdio: "ignore" });
+  console.log("✔ Configured Git core.hooksPath to .githooks");
+} catch (err) {
+  console.warn("⚠️ Could not configure git core.hooksPath automatically:", err?.message || err);
 }
 
-const prePushScript = `#!/usr/bin/env bash
-# GitShark pre-push hook to ensure versions are synchronized and bumped before release
-
-# Resolve node path
-NODE_BIN="$(command -v node 2>/dev/null)"
-if [ -z "$NODE_BIN" ]; then
-  # Fallback to nvm if present
-  [ -s "$HOME/.nvm/nvm.sh" ] && \\. "$HOME/.nvm/nvm.sh"
-  NODE_BIN="$(command -v node 2>/dev/null)"
-fi
-
-if [ -n "$NODE_BIN" ]; then
-  "$NODE_BIN" scripts/verify-version.mjs
-  exit $?
-else
-  echo "⚠️ Node.js not detected in PATH, skipping version verification."
-  exit 0
-fi
-`;
-
-const hookTarget = path.join(gitHooksDir, "pre-push");
-fs.writeFileSync(hookTarget, prePushScript, { mode: 0o755 });
-try {
-  fs.chmodSync(hookTarget, 0o755);
-} catch {}
-
-console.log("✔ Installed Git pre-push hook at .git/hooks/pre-push");
+// 2. Ensure executable permissions on all hook files in .githooks
+if (fs.existsSync(githooksDir)) {
+  const files = fs.readdirSync(githooksDir);
+  for (const file of files) {
+    const fullPath = path.join(githooksDir, file);
+    try {
+      fs.chmodSync(fullPath, 0o755);
+    } catch {}
+  }
+}
