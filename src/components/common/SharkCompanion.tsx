@@ -5,6 +5,7 @@ import {
   computeSharkRank,
   SHARK_RANKS,
 } from "@/store/useSharkStore";
+import { GitSharkLogo } from "./GitSharkLogo";
 import {
   X,
   Sparkles,
@@ -20,110 +21,25 @@ import {
 /**
  * Stylized Neon Predator Shark SVG with Glowing Commit DAG Spine
  */
+/**
+ * Swimming Shark SVG using the canonical GitShark vector model,
+ * flipped horizontally so it swims forward seamlessly across the screen.
+ */
 export const SwimmingSharkSvg: React.FC<{
   className?: string;
   size?: number;
   glowColor?: string;
-}> = ({ className = "", size = 160, glowColor = "#38bdf8" }) => {
+}> = ({ className = "", size = 180, glowColor = "#38bdf8" }) => {
   return (
-    <svg
-      width={size}
-      height={size * 0.42}
-      viewBox="0 0 240 100"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={`${className} overflow-visible drop-shadow-[0_4px_16px_rgba(14,165,233,0.5)]`}
-    >
-      <defs>
-        <linearGradient id="sharkBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#38bdf8" />
-          <stop offset="40%" stopColor="#0284c7" />
-          <stop offset="85%" stopColor="#034870" />
-          <stop offset="100%" stopColor="#022740" />
-        </linearGradient>
-        <linearGradient id="sharkBellyGrad" x1="0%" y1="50%" x2="100%" y2="50%">
-          <stop offset="0%" stopColor="#e0f2fe" stopOpacity="0.9" />
-          <stop offset="50%" stopColor="#38bdf8" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="#0369a1" stopOpacity="0.2" />
-        </linearGradient>
-        <linearGradient id="spineDagGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#34d399" />
-          <stop offset="50%" stopColor="#38bdf8" />
-          <stop offset="100%" stopColor="#a78bfa" />
-        </linearGradient>
-        <filter id="sharkGlow" x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="3" result="blur" />
-          <feComposite in="SourceGraphic" in2="blur" operator="over" />
-        </filter>
-      </defs>
-
-      {/* Tail Fin (Caudal) */}
-      <path
-        d="M 28 50 C 15 28, 5 12, 0 10 C 6 28, 14 44, 20 50 C 14 56, 6 72, 0 90 C 5 88, 15 72, 28 50 Z"
-        fill="url(#sharkBodyGrad)"
-      />
-
-      {/* Main Torpedo Body */}
-      <path
-        d="M 24 50 C 55 42, 110 32, 175 36 C 215 39, 236 48, 240 50 C 236 52, 215 62, 175 66 C 110 70, 55 58, 24 50 Z"
-        fill="url(#sharkBodyGrad)"
-      />
-
-      {/* Dorsal Fin */}
-      <path
-        d="M 115 34 C 130 18, 145 2, 158 0 C 152 14, 148 24, 155 35 Z"
-        fill="url(#sharkBodyGrad)"
-        stroke={glowColor}
-        strokeWidth="1.2"
-      />
-
-      {/* Pectoral Fin */}
-      <path
-        d="M 130 63 C 120 78, 105 94, 95 98 C 108 92, 126 80, 145 64 Z"
-        fill="url(#sharkBodyGrad)"
-        opacity="0.9"
-      />
-
-      {/* Ventral White Belly Accent */}
-      <path
-        d="M 60 52 C 100 58, 160 58, 205 52 C 170 62, 110 63, 60 52 Z"
-        fill="url(#sharkBellyGrad)"
-      />
-
-      {/* Shark Eye (Glowing Cyan Node) */}
-      <circle cx="218" cy="46" r="2.8" fill="#ffffff" filter="url(#sharkGlow)" />
-      <circle cx="218" cy="46" r="1.4" fill="#0369a1" />
-
-      {/* Gill Slits */}
-      <path d="M 166 43 Q 164 50 166 57" stroke="#082f49" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M 171 44 Q 169 50 171 56" stroke="#082f49" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M 176 45 Q 174 50 176 55" stroke="#082f49" strokeWidth="1.5" strokeLinecap="round" />
-
-      {/* Glowing Commit DAG spine along the body */}
-      <g filter="url(#sharkGlow)">
-        {/* Highway Line */}
-        <path
-          d="M 50 50 L 95 48 L 140 47 L 185 48"
-          stroke="url(#spineDagGrad)"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeDasharray="2 3"
-        />
-        {/* Branch up to Dorsal Fin */}
-        <path
-          d="M 125 47 L 145 18"
-          stroke="#38bdf8"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-        {/* Commit Nodes */}
-        <circle cx="50" cy="50" r="3" fill="#34d399" />
-        <circle cx="95" cy="48" r="3.5" fill="#38bdf8" />
-        <circle cx="140" cy="47" r="3.5" fill="#818cf8" />
-        <circle cx="185" cy="48" r="3" fill="#a78bfa" />
-        <circle cx="145" cy="18" r="3" fill="#38bdf8" />
-      </g>
-    </svg>
+    <GitSharkLogo
+      size={size}
+      flipX={true}
+      withBackground={false}
+      withGlow={true}
+      animated={true}
+      glowColor={glowColor}
+      className={`${className} drop-shadow-[0_8px_24px_rgba(14,165,233,0.5)]`}
+    />
   );
 };
 
@@ -440,9 +356,9 @@ export const SharkWisdomModal: React.FC = () => {
       {/* Oceanic Header Accent */}
       <div className="flex items-center justify-between px-3.5 py-2.5 bg-gradient-to-r from-shark-950 via-sky-950/50 to-shark-950 border-b border-shark-800">
         <div className="flex items-center gap-2">
-          <span className="text-base">{rank.emoji}</span>
+          <GitSharkLogo size="sm" withBackground={false} withGlow={true} className="flex-shrink-0" />
           <span className="text-xs font-bold bg-gradient-to-r from-sky-400 to-teal-300 bg-clip-text text-transparent">
-            Shark Companion & Oceanic Telemetry
+            GitShark Companion & Stats
           </span>
           <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-950 border border-sky-800/60 text-sky-400">
             Lv.{rank.level}

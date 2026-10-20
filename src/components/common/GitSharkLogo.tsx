@@ -1,11 +1,14 @@
 import React from "react";
 
 export interface GitSharkLogoProps {
-  size?: "xs" | "sm" | "md" | "lg" | "xl" | "2xl" | "3xl";
+  size?: "xs" | "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | number;
   withBackground?: boolean;
   withGlow?: boolean;
   animated?: boolean;
+  flipX?: boolean;
+  glowColor?: string;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 const SIZE_MAP = {
@@ -23,9 +26,15 @@ export const GitSharkLogo: React.FC<GitSharkLogoProps> = ({
   withBackground = false,
   withGlow = true,
   animated = false,
+  flipX = false,
+  glowColor,
   className = "",
+  style,
 }) => {
-  const sizeClass = SIZE_MAP[size] || size;
+  const isNumericSize = typeof size === "number";
+  const sizeClass = isNumericSize
+    ? ""
+    : (SIZE_MAP[size as keyof typeof SIZE_MAP] || size);
   const idPrefix = React.useId().replace(/:/g, "_");
 
   const bgGradId = `${idPrefix}-bgGrad`;
@@ -41,11 +50,25 @@ export const GitSharkLogo: React.FC<GitSharkLogoProps> = ({
 
   const viewBox = withBackground ? "0 0 512 512" : "68 80 394 340";
 
+  const numericWidth = isNumericSize ? size : undefined;
+  const numericHeight = isNumericSize
+    ? withBackground
+      ? size
+      : Math.round(size * (340 / 394))
+    : undefined;
+
+  const combinedStyle: React.CSSProperties = {
+    ...(isNumericSize ? { width: numericWidth, height: numericHeight } : {}),
+    ...(flipX ? { transform: "scaleX(-1)", transformOrigin: "center" } : {}),
+    ...style,
+  };
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox={viewBox}
       className={`${sizeClass} ${className} flex-shrink-0 select-none overflow-visible`}
+      style={combinedStyle}
       fill="none"
     >
       <defs>
@@ -112,7 +135,7 @@ export const GitSharkLogo: React.FC<GitSharkLogoProps> = ({
         )}
 
         <filter id={dropShadowId} x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="8" stdDeviation="12" floodColor="#0284c7" floodOpacity="0.3" />
+          <feDropShadow dx="0" dy="8" stdDeviation="12" floodColor={glowColor || "#0284c7"} floodOpacity="0.3" />
         </filter>
       </defs>
 

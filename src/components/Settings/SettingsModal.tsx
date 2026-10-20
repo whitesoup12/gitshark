@@ -19,6 +19,7 @@ import {
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSharkStore } from "@/store/useSharkStore";
 import { APP_VERSION } from "@/constants/version";
+import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import type { SettingsTab } from "@/types";
 
 export const SettingsModal: React.FC = () => {
@@ -534,10 +535,15 @@ export const SettingsModal: React.FC = () => {
                       triggerCelebration("frenzy", "🦈 MEGALODON FRENZY UNLOCKED! 🌊");
                       closeSettings();
                     }}
-                    className="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-600 to-blue-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-sky-600/30 cursor-pointer hover:scale-110 active:scale-95 transition-transform"
+                    className="cursor-pointer hover:scale-105 active:scale-95 transition-transform"
                     title="Click for a Megalodon surprise! 🦈"
                   >
-                    🦈
+                    <GitSharkLogo
+                      size="xl"
+                      withBackground={true}
+                      withGlow={true}
+                      className="rounded-xl shadow-lg shadow-sky-600/30"
+                    />
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">

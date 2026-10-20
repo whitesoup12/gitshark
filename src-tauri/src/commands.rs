@@ -1584,10 +1584,29 @@ pub async fn open_in_browser(app_handle: AppHandle, url: String) -> Result<(), S
         return Err("Only http and https URLs can be opened in the browser".to_string());
     }
     use tauri_plugin_shell::ShellExt;
-    app_handle
-        .shell()
-        .open(&url, None)
-        .map_err(|e| format!("Failed to open browser: {e}"))
+    if let Err(e) = app_handle.shell().open(&url, None) {
+        log::warn!("tauri-plugin-shell failed to open URL ({e}), falling back to system launcher");
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/c", "start", "", &url])
+                .spawn();
+            return Ok(());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+            return Ok(());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+            return Ok(());
+        }
+        #[allow(unreachable_code)]
+        return Err(format!("Failed to open browser: {e}"));
+    }
+    Ok(())
 }
 
 #[tauri::command]
