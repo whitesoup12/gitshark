@@ -3175,7 +3175,7 @@ mod tests {
         assert_eq!(final_unstaged.total_deletions, 0);
 
         let final_content = std::fs::read_to_string(&file_path).unwrap();
-        assert_eq!(final_content, "line 1\nline 2 mod A\nline 3\n");
+        assert_eq!(final_content.replace("\r\n", "\n"), "line 1\nline 2 mod A\nline 3\n");
 
         let _ = fs::remove_dir_all(&test_dir);
     }
