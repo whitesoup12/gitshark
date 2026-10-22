@@ -185,6 +185,20 @@ export const CommandPaletteModal: React.FC = () => {
       });
 
       items.push({
+        id: "action-view-pr",
+        category: "actions",
+        title: "Switch to PR View (Branch Comparison)",
+        subtitle: "Compare branches against main with commit log and full diff",
+        icon: <GitPullRequest className="w-4 h-4 text-emerald-400" />,
+        keywords: ["pr", "pull request", "compare", "branch", "diff", "review"],
+        shortcut: "3",
+        onSelect: () => {
+          setActiveView(tabId, "pr");
+          close();
+        },
+      });
+
+      items.push({
         id: "action-pull-rebase",
         category: "actions",
         title: "Pull with Rebase",

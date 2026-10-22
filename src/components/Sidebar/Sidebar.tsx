@@ -57,6 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     executeHookDryRun,
     setActiveView,
     updateTab,
+    openInPrView,
     pruneWorktrees,
     openRepositoryTab,
   } = useWorkspaceStore();
@@ -876,6 +877,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
           }}
           onRename={(b) => setBranchToRename(b)}
           onDelete={(b) => promptDeleteBranch(b.shorthand, b.is_remote)}
+          onComparePr={(b) => openInPrView(tab.id, b.shorthand)}
           activePr={contextMenu.activePr}
           onOpenPr={(b) => {
             if (contextMenu.activePr) {

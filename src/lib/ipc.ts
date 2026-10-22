@@ -21,6 +21,7 @@ import type {
   ConflictFileDetails,
   FileBlameData,
   FileHistoryItem,
+  BranchComparisonDetails,
 } from "@/types";
 import { showPrompt } from "@/store/useDialogStore";
 
@@ -1212,6 +1213,114 @@ export async function getCommitFileDiffIpc(
     repoId,
     commitSha,
     filePath,
+  });
+}
+
+/**
+ * Compare two branches (e.g. main vs feature branch for PR View)
+ */
+export async function getBranchComparisonIpc(
+  repoId: string,
+  baseRef: string,
+  compareRef: string,
+  includeUncommitted: boolean = false
+): Promise<BranchComparisonDetails> {
+  if (!isTauriEnvironment()) {
+    return {
+      base_ref: baseRef,
+      compare_ref: compareRef,
+      base_commit: "mock-base-sha-1234567890",
+      compare_commit: "mock-compare-sha-0987654321",
+      merge_base_commit: "mock-merge-base-sha-11223344",
+      ahead: 3,
+      behind: 0,
+      total_additions: 142,
+      total_deletions: 28,
+      commits: [
+        {
+          hash: "a1b2c3d4e5f6",
+          summary: "feat(pr-view): add branch comparison & diff inspector",
+          body: "Initial commit for PR view comparison",
+          author_name: "Mock Author",
+          author_email: "author@gitshark.dev",
+          timestamp: Math.floor(Date.now() / 1000) - 7200,
+        },
+        {
+          hash: "f6e5d4c3b2a1",
+          summary: "test(pr-view): add unit tests for branch comparison",
+          body: null,
+          author_name: "Mock Author",
+          author_email: "author@gitshark.dev",
+          timestamp: Math.floor(Date.now() / 1000) - 3600,
+        },
+      ],
+      files: [
+        {
+          path: "src/components/pr/PullRequestComparisonView.tsx",
+          status: "added",
+          additions: 120,
+          deletions: 0,
+        },
+        {
+          path: "src-tauri/src/git.rs",
+          status: "modified",
+          additions: 22,
+          deletions: 28,
+        },
+      ],
+    };
+  }
+  return await invoke<BranchComparisonDetails>("get_branch_comparison", {
+    repoId,
+    baseRef,
+    compareRef,
+    includeUncommitted,
+  });
+}
+
+/**
+ * Get structured FileDiff for a file in a branch comparison
+ */
+export async function getBranchComparisonFileDiffIpc(
+  repoId: string,
+  baseRef: string,
+  compareRef: string,
+  filePath: string,
+  includeUncommitted: boolean = false
+): Promise<FileDiff> {
+  if (!isTauriEnvironment()) {
+    return {
+      old_path: filePath,
+      new_path: filePath,
+      is_binary: false,
+      is_new: false,
+      is_deleted: false,
+      hunks: [
+        {
+          header: "@@ -1,5 +1,8 @@",
+          old_start: 1,
+          old_lines: 5,
+          new_start: 1,
+          new_lines: 8,
+          patch: "Mock PR diff patch",
+          lines: [
+            { origin: " ", content: "// PR View branch comparison", old_lineno: 1, new_lineno: 1 },
+            { origin: "-", content: "const prevComparison = false;", old_lineno: 2 },
+            { origin: "+", content: "const prViewSupported = true;", new_lineno: 2 },
+            { origin: "+", content: "const baseBranch = 'main';", new_lineno: 3 },
+          ],
+        },
+      ],
+      total_additions: 2,
+      total_deletions: 1,
+    };
+  }
+  return await invoke<FileDiff>("get_branch_comparison_file_diff", {
+    repoId,
+    baseRef,
+    compareRef,
+    filePath,
+    includeUncommitted,
   });
 }
 

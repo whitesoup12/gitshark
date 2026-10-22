@@ -7,3 +7,4 @@ export * from "./hooks";
 export * from "./worktree";
 export * from "./remote";
 export * from "./settings";
+export * from "./compare";
