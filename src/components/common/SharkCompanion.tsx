@@ -418,8 +418,8 @@ export const SharkWisdomModal: React.FC = () => {
             />
           </div>
 
-          {/* 4 Feeding & XP Stat Counters */}
-          <div className="grid grid-cols-4 gap-1.5 pt-0.5 text-center">
+          {/* 3 Feeding & XP Stat Counters */}
+          <div className="grid grid-cols-3 gap-1.5 pt-0.5 text-center">
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
               title="Commits created (+1 XP each)"
@@ -449,16 +449,6 @@ export const SharkWisdomModal: React.FC = () => {
               </div>
               <div className="text-[9px] text-slate-400 truncate">New PRs</div>
               <div className="text-[8px] font-mono text-purple-400/80">+10 XP</div>
-            </div>
-            <div
-              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
-              title="Discarded files, deleted branches & dropped stashes chomped"
-            >
-              <div className="text-xs font-bold font-mono text-rose-300">
-                {stats.changesChomped}
-              </div>
-              <div className="text-[9px] text-slate-400 truncate">Chomped</div>
-              <div className="text-[8px] font-mono text-rose-400/80">🦈 Jaws</div>
             </div>
           </div>
 

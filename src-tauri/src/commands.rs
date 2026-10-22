@@ -1062,6 +1062,29 @@ pub async fn list_worktrees(
     Ok(items)
 }
 
+pub fn build_worktree_add_args(
+    path: &str,
+    branch: &str,
+    new_branch: bool,
+    no_track: bool,
+) -> Vec<String> {
+    let mut args = vec!["worktree".to_string(), "add".to_string()];
+    if new_branch {
+        args.push("-b".to_string());
+        args.push(branch.to_string());
+        if no_track {
+            args.push("--no-track".to_string());
+        }
+        args.push(path.to_string());
+    } else {
+        args.push(path.to_string());
+        if !branch.trim().is_empty() {
+            args.push(branch.to_string());
+        }
+    }
+    args
+}
+
 #[tauri::command]
 pub async fn add_worktree(
     state: State<'_, AppRepoState>,
@@ -1069,6 +1092,7 @@ pub async fn add_worktree(
     path: String,
     branch: String,
     new_branch: Option<bool>,
+    no_track: Option<bool>,
 ) -> Result<(), String> {
     let (workdir, git_cmd) = {
         let registry = state.read();
@@ -1078,17 +1102,12 @@ pub async fn add_worktree(
         (session.path.clone(), resolve_git_command())
     };
 
-    let mut args = vec!["worktree".to_string(), "add".to_string()];
-    if new_branch.unwrap_or(false) {
-        args.push("-b".to_string());
-        args.push(branch.clone());
-        args.push(path);
-    } else {
-        args.push(path);
-        if !branch.trim().is_empty() {
-            args.push(branch);
-        }
-    }
+    let args = build_worktree_add_args(
+        &path,
+        &branch,
+        new_branch.unwrap_or(false),
+        no_track.unwrap_or(true),
+    );
 
     let output = create_silent_command(&git_cmd)
         .args(&args)
@@ -2423,6 +2442,18 @@ mod tests {
         let path = resolve_open_repos_path();
         assert!(path.to_string_lossy().contains(".gitshark"));
         assert!(path.to_string_lossy().ends_with("open_repos.json"));
+    }
+
+    #[test]
+    fn test_build_worktree_add_args() {
+        let args_default = build_worktree_add_args("../wt-path", "feat-wt", true, true);
+        assert_eq!(args_default, vec!["worktree", "add", "-b", "feat-wt", "--no-track", "../wt-path"]);
+
+        let args_track = build_worktree_add_args("../wt-path", "feat-wt", true, false);
+        assert_eq!(args_track, vec!["worktree", "add", "-b", "feat-wt", "../wt-path"]);
+
+        let args_existing = build_worktree_add_args("../wt-path", "existing-branch", false, true);
+        assert_eq!(args_existing, vec!["worktree", "add", "../wt-path", "existing-branch"]);
     }
 
     #[test]

@@ -12,6 +12,7 @@ import { GlobalDialogHost } from "@/components/common/GlobalDialogHost";
 import { CommandPaletteModal } from "@/components/palette/CommandPaletteModal";
 import { FileBlameModal } from "@/components/blame/FileBlameModal";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
+import { useUpdateStore } from "@/store/useUpdateStore";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId, initWorkspaceSession } = useWorkspaceStore();
@@ -24,6 +25,7 @@ export const App: React.FC = () => {
     initSettings();
     initSharkStats();
     initWorkspaceSession();
+    useUpdateStore.getState().checkForUpdates();
   }, [initSettings, initSharkStats, initWorkspaceSession]);
 
   // Global keyboard shortcuts: Ctrl+, / Cmd+, for Settings, Escape to close

@@ -786,10 +786,11 @@ export async function addWorktreeIpc(
   repoId: string,
   path: string,
   branch: string,
-  newBranch: boolean = false
+  newBranch: boolean = false,
+  noTrack: boolean = true
 ): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log(`[Browser Sim] add_worktree: ${path} (${branch})`);
+    console.log(`[Browser Sim] add_worktree: ${path} (${branch}) (noTrack=${noTrack})`);
     return;
   }
   return await invoke<void>("add_worktree", {
@@ -797,6 +798,7 @@ export async function addWorktreeIpc(
     path,
     branch,
     newBranch,
+    noTrack,
   });
 }
 

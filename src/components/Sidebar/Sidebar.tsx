@@ -22,7 +22,9 @@ import {
   Layers,
   AlertTriangle,
   Edit3,
+  Sparkles,
 } from "lucide-react";
+import { useUpdateStore } from "@/store/useUpdateStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { WorktreeSection } from "./WorktreeSection";
@@ -63,6 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   } = useWorkspaceStore();
 
   const openSettings = useSettingsStore((s) => s.openSettings);
+  const { hasUpdate, latestVersion, releaseUrl } = useUpdateStore();
 
   interface SidebarSectionsState {
     branches: boolean;
@@ -833,11 +836,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
       <div className="px-3 py-2 border-t border-shark-800/80 bg-shark-950/60 flex items-center justify-between text-xs select-none flex-shrink-0">
         {!tab.sidebarCollapsed ? (
           <>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 truncate mr-1">
               <span className="text-[11px] font-semibold text-slate-400">GitShark</span>
               <span className="font-mono text-[10px] text-sky-400/90 bg-sky-950/60 border border-sky-800/40 px-1.5 py-0.2 rounded font-medium">
                 v{APP_VERSION}
               </span>
+              {hasUpdate && latestVersion && (
+                <button
+                  onClick={() => openInBrowserIpc(releaseUrl)}
+                  className="flex items-center gap-1 font-mono text-[9px] text-emerald-300 bg-emerald-950/90 border border-emerald-500/50 hover:bg-emerald-900/80 px-1.5 py-0.5 rounded font-semibold transition-all shadow-[0_0_8px_rgba(16,185,129,0.25)] animate-pulse"
+                  title={`Update available: v${latestVersion}! Click to open release notes & download.`}
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                  <span>Update: v{latestVersion}</span>
+                </button>
+              )}
             </div>
             <button
               onClick={() => openSettings("git")}
@@ -849,11 +862,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
           </>
         ) : (
           <button
-            onClick={() => openSettings("git")}
-            className="w-full flex items-center justify-center p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
-            title={`GitShark v${APP_VERSION} — Settings`}
+            onClick={() => openSettings("about")}
+            className="relative w-full flex items-center justify-center p-1 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-800 transition-colors"
+            title={`GitShark v${APP_VERSION}${hasUpdate && latestVersion ? ` (Update v${latestVersion} available)` : ""} — Settings`}
           >
             <Settings className="w-3.5 h-3.5" />
+            {hasUpdate && (
+              <span className="absolute top-1 right-2.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-shark-950 animate-pulse" />
+            )}
           </button>
         )}
       </div>

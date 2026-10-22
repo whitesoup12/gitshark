@@ -24,6 +24,7 @@ import {
   FileText,
 } from "lucide-react";
 import { useCommandPaletteStore, PaletteCategory } from "@/store/useCommandPaletteStore";
+import { useUpdateStore } from "@/store/useUpdateStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSharkStore } from "@/store/useSharkStore";
@@ -486,6 +487,20 @@ export const CommandPaletteModal: React.FC = () => {
       onSelect: () => {
         close();
         openWisdom();
+      },
+    });
+
+    items.push({
+      id: "action-check-updates",
+      category: "actions",
+      title: "Check for Updates...",
+      subtitle: "Check GitHub for the latest releases of GitShark",
+      icon: <Sparkles className="w-4 h-4 text-emerald-400" />,
+      keywords: ["update", "version", "upgrade", "latest", "release", "download"],
+      onSelect: () => {
+        close();
+        openSettings("about");
+        useUpdateStore.getState().checkForUpdates(true);
       },
     });
 

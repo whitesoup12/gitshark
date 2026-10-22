@@ -19,6 +19,8 @@ import {
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useSharkStore } from "@/store/useSharkStore";
 import { APP_VERSION } from "@/constants/version";
+import { useUpdateStore } from "@/store/useUpdateStore";
+import { openInBrowserIpc } from "@/lib/ipc";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import type { SettingsTab } from "@/types";
 
@@ -46,6 +48,16 @@ export const SettingsModal: React.FC = () => {
     setDevDirectory,
     browseForDevDirectory,
   } = useSettingsStore();
+
+  const {
+    hasUpdate,
+    latestVersion,
+    releaseUrl,
+    isChecking: isCheckingUpdates,
+    lastChecked: lastCheckedUpdates,
+    error: updateError,
+    checkForUpdates,
+  } = useUpdateStore();
 
   const {
     celebrationsEnabled,
@@ -556,6 +568,66 @@ export const SettingsModal: React.FC = () => {
                       Blazingly fast, modern Git desktop client built with Tauri v2, Rust (libgit2), React 19, and Tailwind CSS.
                     </p>
                   </div>
+                </div>
+
+                {/* Software Updates Card */}
+                <div className="p-4 rounded-lg bg-shark-950 border border-shark-800 space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-sky-400" />
+                      <span className="font-medium text-slate-200">Software Updates</span>
+                    </div>
+                    <button
+                      onClick={() => checkForUpdates(true)}
+                      disabled={isCheckingUpdates}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-shark-850 hover:bg-shark-800 border border-shark-750 text-slate-300 hover:text-slate-100 transition-colors text-[11px] disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 text-sky-400 ${isCheckingUpdates ? "animate-spin" : ""}`} />
+                      <span>{isCheckingUpdates ? "Checking..." : "Check for Updates"}</span>
+                    </button>
+                  </div>
+
+                  {hasUpdate && latestVersion ? (
+                    <div className="p-3 rounded-lg bg-emerald-950/50 border border-emerald-600/40 flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 text-emerald-300 font-semibold text-xs">
+                          <span>A new release of GitShark is available!</span>
+                          <span className="font-mono text-[10px] bg-emerald-900/80 px-1.5 py-0.2 rounded border border-emerald-500/50 text-emerald-200 font-bold">
+                            v{latestVersion}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          You are currently running v{APP_VERSION}. Click to review release notes and download.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => openInBrowserIpc(releaseUrl)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition-colors shadow-sm flex-shrink-0"
+                      >
+                        <span>Download Update</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-2.5 rounded bg-shark-900/60 border border-shark-800/80">
+                      <div className="flex items-center gap-2 text-slate-300 text-[11px]">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>GitShark is up to date (v{APP_VERSION})</span>
+                      </div>
+                      {lastCheckedUpdates && (
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          Checked {new Date(lastCheckedUpdates).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {updateError && (
+                    <div className="text-[11px] text-rose-400 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>{updateError}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-4 rounded-lg bg-shark-950 border border-shark-800 space-y-3 text-xs">
