@@ -7,9 +7,11 @@ import { CommitGraphCanvas } from "@/components/graph/CommitGraphCanvas";
 import { CommitInspector } from "@/components/graph/CommitInspector";
 import { CommitContextMenu } from "@/components/graph/CommitContextMenu";
 import { WorkspaceDiffSplit } from "@/components/workspace/WorkspaceDiffSplit";
+import { PullRequestComparisonView } from "@/components/pr/PullRequestComparisonView";
 import {
   GitCommit,
   FileCode,
+  GitPullRequest,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -226,7 +228,7 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
           <button
             onClick={() => setActiveView(tab.id, "status")}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-              tab.activeView !== "graph"
+              tab.activeView === "status" || tab.activeView === "diff"
                 ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
                 : "text-slate-400 hover:text-slate-200"
             }`}
@@ -255,6 +257,18 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
                 {commits.length}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveView(tab.id, "pr")}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              tab.activeView === "pr"
+                ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <GitPullRequest className="w-3.5 h-3.5" />
+            <span>PR View</span>
           </button>
         </div>
 
@@ -496,6 +510,10 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
 
         {(tab.activeView === "diff" || tab.activeView === "status") && (
           <WorkspaceDiffSplit tab={tab} />
+        )}
+
+        {tab.activeView === "pr" && (
+          <PullRequestComparisonView tab={tab} />
         )}
       </div>
     </main>

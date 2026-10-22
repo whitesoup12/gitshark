@@ -31,6 +31,7 @@ export interface BranchContextMenuProps {
   onRename?: (branch: BranchItem) => void;
   onDelete: (branch: BranchItem) => void;
   onOpenPr?: (branch: BranchItem) => void;
+  onComparePr?: (branch: BranchItem) => void;
   activePr?: import("@/types").PullRequestInfo | null;
   linkedWorktree?: import("@/types").WorktreeItem | null;
   onPruneWorktrees?: () => void;
@@ -51,6 +52,7 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
   onRename,
   onDelete,
   onOpenPr,
+  onComparePr,
   activePr,
   linkedWorktree,
   onPruneWorktrees,
@@ -299,6 +301,21 @@ export const BranchContextMenu: React.FC<BranchContextMenuProps> = ({
           <GitFork className="w-3.5 h-3.5 text-sky-400" />
           <span>New Branch From Here...</span>
         </button>
+
+        {/* Open in PR View (Compare with main) */}
+        {onComparePr && (
+          <button
+            onClick={() => {
+              onComparePr(branch);
+              onClose();
+            }}
+            className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-sky-600/20 hover:text-sky-300 text-sky-300 cursor-pointer transition-colors text-left"
+            title={`Compare '${branch.shorthand}' against main in PR View`}
+          >
+            <GitPullRequest className="w-3.5 h-3.5 text-sky-400" />
+            <span>Open in PR View (Compare)</span>
+          </button>
+        )}
 
         {/* View / Create Pull Request in Browser */}
         {activePr ? (

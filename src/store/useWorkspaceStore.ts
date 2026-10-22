@@ -10,6 +10,7 @@ import {
   StashItem,
   StashDetails,
   FileDiff,
+  BranchComparisonDetails,
 } from "@/types";
 import {
   openRepositoryIpc,
@@ -45,6 +46,8 @@ import {
   dropStashIpc,
   getStashDetailsIpc,
   getStashFileDiffIpc,
+  getBranchComparisonIpc,
+  getBranchComparisonFileDiffIpc,
   listTagsIpc,
   createTagIpc,
   deleteTagIpc,
@@ -145,6 +148,22 @@ interface WorkspaceState {
   openRepoInBrowser: (tabId: string) => Promise<boolean>;
   createPullRequestInBrowser: (tabId: string, branchName?: string) => Promise<boolean>;
   fetchPullRequests: (tabId: string) => Promise<PullRequestInfo[]>;
+
+  // Branch Comparison & PR View
+  fetchBranchComparison: (
+    tabId: string,
+    baseRef: string,
+    compareRef: string,
+    includeUncommitted?: boolean
+  ) => Promise<BranchComparisonDetails | null>;
+  fetchBranchComparisonFileDiff: (
+    tabId: string,
+    baseRef: string,
+    compareRef: string,
+    filePath: string,
+    includeUncommitted?: boolean
+  ) => Promise<FileDiff | null>;
+  openInPrView: (tabId: string, compareBranch?: string, baseBranch?: string) => void;
 }
 
 // Module-level timers map for elapsed stopwatch per tab
@@ -2211,5 +2230,78 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       console.warn("Failed to fetch pull requests:", err);
       return [];
     }
+  },
+
+  fetchBranchComparison: async (
+    tabId: string,
+    baseRef: string,
+    compareRef: string,
+    includeUncommitted?: boolean
+  ) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return null;
+
+    try {
+      return await getBranchComparisonIpc(tab.repoId, baseRef, compareRef, includeUncommitted);
+    } catch (err) {
+      console.error(`Failed to compare branches ${baseRef}...${compareRef}:`, err);
+      showAlert({
+        title: "Branch Comparison Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return null;
+    }
+  },
+
+  fetchBranchComparisonFileDiff: async (
+    tabId: string,
+    baseRef: string,
+    compareRef: string,
+    filePath: string,
+    includeUncommitted?: boolean
+  ) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return null;
+
+    try {
+      return await getBranchComparisonFileDiffIpc(
+        tab.repoId,
+        baseRef,
+        compareRef,
+        filePath,
+        includeUncommitted
+      );
+    } catch (err) {
+      console.error(`Failed to fetch branch comparison file diff (${filePath}):`, err);
+      showAlert({
+        title: "Load Comparison Diff Failed",
+        message: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+      return null;
+    }
+  },
+
+  openInPrView: (tabId: string, compareBranch?: string, baseBranch?: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const currentBranch = tab.metadata?.current_branch || "main";
+    const hasMain =
+      tab.branches?.local.some((b) => b.shorthand === "main") ||
+      tab.branches?.remote.some((b) => b.shorthand.endsWith("/main"));
+    const hasMaster =
+      tab.branches?.local.some((b) => b.shorthand === "master") ||
+      tab.branches?.remote.some((b) => b.shorthand.endsWith("/master"));
+    const detectedDefault = hasMain ? "main" : hasMaster ? "master" : "main";
+
+    const defaultBase = baseBranch || detectedDefault;
+    const defaultCompare = compareBranch || currentBranch;
+    get().updateTab(tabId, {
+      activeView: "pr",
+      prCompareBase: defaultBase,
+      prCompareTarget: defaultCompare,
+      prSelectedFile: null,
+    });
   },
 }));

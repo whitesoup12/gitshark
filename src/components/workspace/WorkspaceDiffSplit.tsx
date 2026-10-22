@@ -48,109 +48,128 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
 
   // Sync if tab.selectedFilePath changes externally (e.g. from Command Palette)
   useEffect(() => {
-    if (tab.selectedFilePath) {
-      setSelectedFilePath(tab.selectedFilePath);
-      const isStaged = status.staged.some((f) => f.path === tab.selectedFilePath);
-      setSelectedFileStaged(isStaged);
-    }
-  }, [tab.selectedFilePath, status.staged]);
-
-  // 1. Fetch working directory status
-  const loadStatus = useCallback(async (silent = false) => {
-    if (!tab.repoId) return;
-    if (!silent) {
-      setIsLoadingStatus(true);
-    }
-    try {
-      const currentStatus = await getWorkingTreeStatusIpc(tab.repoId);
-      setStatus(currentStatus);
-
-      // If no file currently selected or previously selected file was removed, auto-select first available file
-      setSelectedFilePath((prev) => {
-        const preferred = tab.selectedFilePath || prev;
-
-        if (preferred) {
-          const inConflicted = currentStatus.conflicted?.some((f) => f.path === preferred);
-          const inStaged = currentStatus.staged.some((f) => f.path === preferred);
-          const inUnstaged =
-            currentStatus.unstaged.some((f) => f.path === preferred) ||
-            currentStatus.untracked.some((f) => f.path === preferred);
-
-          if (inConflicted) {
-            setSelectedFileStaged(false);
-            return preferred;
-          }
-          if (inStaged) {
-            setSelectedFileStaged(true);
-            return preferred;
-          }
-          if (inUnstaged) {
-            setSelectedFileStaged(false);
-            return preferred;
-          }
-        }
-
-        // Prioritize conflicted files
-        if (currentStatus.conflicted && currentStatus.conflicted.length > 0) {
-          setSelectedFileStaged(false);
-          return currentStatus.conflicted[0].path;
-        }
-
-        const firstUnstaged = currentStatus.unstaged[0] || currentStatus.untracked[0];
-        if (firstUnstaged) {
-          setSelectedFileStaged(false);
-          return firstUnstaged.path;
-        }
-
-        const firstStaged = currentStatus.staged[0];
-        if (firstStaged) {
-          setSelectedFileStaged(true);
-          return firstStaged.path;
-        }
-
-        return null;
-      });
-    } catch (err) {
-      console.error("Failed to load working tree status:", err);
-    } finally {
-      if (!silent) {
-        setIsLoadingStatus(false);
-      }
-    }
-  }, [tab.repoId]);
-
-  // 2. Fetch diff for selected file
-  const loadDiff = useCallback(async (silent = false) => {
-    if (!tab.repoId || !selectedFilePath) {
-      setDiff(null);
-      return;
-    }
-
-    if (!silent) {
-      setIsLoadingDiff(true);
-    } else {
-      setIsRefreshingDiff(true);
-    }
-    try {
-      const fileDiff = await getFileDiffIpc(
-        tab.repoId,
-        selectedFilePath,
-        selectedFileStaged
-      );
-      setDiff(fileDiff);
-    } catch (err) {
-      console.error("Failed to load file diff:", err);
-      if (!silent) {
+    if (tab.selectedFilePath !== selectedFilePath) {
+      setSelectedFilePath(tab.selectedFilePath || null);
+      if (tab.selectedFilePath) {
+        const isStaged = status.staged.some((f) => f.path === tab.selectedFilePath);
+        setSelectedFileStaged(isStaged);
+      } else {
+        setSelectedFileStaged(false);
         setDiff(null);
       }
-    } finally {
-      if (!silent) {
-        setIsLoadingDiff(false);
-      } else {
-        setIsRefreshingDiff(false);
-      }
     }
-  }, [tab.repoId, selectedFilePath, selectedFileStaged]);
+  }, [tab.selectedFilePath]);
+
+  // 1. Fetch working directory status
+  const loadStatus = useCallback(
+    async (silent = false) => {
+      if (!tab.repoId) return;
+      if (!silent) {
+        setIsLoadingStatus(true);
+      }
+      try {
+        const currentStatus = await getWorkingTreeStatusIpc(tab.repoId);
+        setStatus(currentStatus);
+
+        // If no file currently selected or previously selected file was removed, auto-select first available file
+        setSelectedFilePath((prev) => {
+          const preferred = prev || tab.selectedFilePath;
+
+          if (preferred) {
+            const inConflicted = currentStatus.conflicted?.some((f) => f.path === preferred);
+            const inStaged = currentStatus.staged.some((f) => f.path === preferred);
+            const inUnstaged =
+              currentStatus.unstaged.some((f) => f.path === preferred) ||
+              currentStatus.untracked.some((f) => f.path === preferred);
+
+            if (inConflicted) {
+              setSelectedFileStaged(false);
+              return preferred;
+            }
+            if (inStaged) {
+              setSelectedFileStaged(true);
+              return preferred;
+            }
+            if (inUnstaged) {
+              setSelectedFileStaged(false);
+              return preferred;
+            }
+          }
+
+          // Previous file is no longer modified/staged/untracked. Auto-select next available file:
+          let nextPath: string | null = null;
+          let nextStaged = false;
+
+          if (currentStatus.conflicted && currentStatus.conflicted.length > 0) {
+            nextPath = currentStatus.conflicted[0].path;
+            nextStaged = false;
+          } else {
+            const firstUnstaged = currentStatus.unstaged[0] || currentStatus.untracked[0];
+            if (firstUnstaged) {
+              nextPath = firstUnstaged.path;
+              nextStaged = false;
+            } else {
+              const firstStaged = currentStatus.staged[0];
+              if (firstStaged) {
+                nextPath = firstStaged.path;
+                nextStaged = true;
+              }
+            }
+          }
+
+          setSelectedFileStaged(nextStaged);
+          updateTab(tab.id, { selectedFilePath: nextPath });
+          if (!nextPath) {
+            setDiff(null);
+          }
+          return nextPath;
+        });
+      } catch (err) {
+        console.error("Failed to load working tree status:", err);
+      } finally {
+        if (!silent) {
+          setIsLoadingStatus(false);
+        }
+      }
+    },
+    [tab.repoId, tab.id, tab.selectedFilePath, updateTab]
+  );
+
+  // 2. Fetch diff for selected file
+  const loadDiff = useCallback(
+    async (silent = false) => {
+      if (!tab.repoId || !selectedFilePath) {
+        setDiff(null);
+        return;
+      }
+
+      if (!silent) {
+        setIsLoadingDiff(true);
+      } else {
+        setIsRefreshingDiff(true);
+      }
+      try {
+        const fileDiff = await getFileDiffIpc(
+          tab.repoId,
+          selectedFilePath,
+          selectedFileStaged
+        );
+        setDiff(fileDiff);
+      } catch (err) {
+        console.error("Failed to load file diff:", err);
+        if (!silent) {
+          setDiff(null);
+        }
+      } finally {
+        if (!silent) {
+          setIsLoadingDiff(false);
+        } else {
+          setIsRefreshingDiff(false);
+        }
+      }
+    },
+    [tab.repoId, selectedFilePath, selectedFileStaged]
+  );
 
   // Reset diff to null whenever active selected file changes so the new file diff loads cleanly
   useEffect(() => {
@@ -178,7 +197,6 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
       }
       debounceTimer = setTimeout(() => {
         loadStatus(true);
-        loadDiff(true);
       }, 250);
     }).then((fn) => {
       unlisten = fn;
@@ -188,19 +206,17 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
       if (debounceTimer) clearTimeout(debounceTimer);
       if (unlisten) unlisten();
     };
-  }, [tab.repoId, loadStatus, loadDiff]);
+  }, [tab.repoId, loadStatus]);
 
   // 4. Auto-refresh working tree status and diff when commit/hook completes, or on branch switch/pull/stash/refreshEpoch
   useEffect(() => {
-    loadStatus();
-    loadDiff();
+    loadStatus(true);
   }, [
     tab.refreshEpoch,
     tab.hookState?.status,
     tab.metadata?.current_branch,
     tab.metadata?.head_commit_hash,
     loadStatus,
-    loadDiff,
   ]);
 
   // Staging handlers

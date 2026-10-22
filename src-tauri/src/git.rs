@@ -1260,7 +1260,7 @@ pub fn parse_git2_diff(diff: &git2::Diff, clean_path: &str) -> Result<FileDiff, 
             old_path = delta.old_file().path().map(|p| p.to_string_lossy().to_string());
             new_path = delta.new_file().path().map(|p| p.to_string_lossy().to_string());
             is_binary = delta.flags().contains(git2::DiffFlags::BINARY);
-            is_new = delta.status() == git2::Delta::Added;
+            is_new = delta.status() == git2::Delta::Added || delta.status() == git2::Delta::Untracked;
             is_deleted = delta.status() == git2::Delta::Deleted;
         }
 
@@ -2161,7 +2161,15 @@ pub fn create_stash(
     };
 
     repo.stash_save2(&sig, message, Some(flags))
-        .map_err(|e| format!("Failed to save stash: {e}"))?;
+        .map_err(|e| {
+            if e.code() == git2::ErrorCode::NotFound
+                || e.message().to_lowercase().contains("nothing to stash")
+            {
+                "No local changes to stash.".to_string()
+            } else {
+                format!("Failed to save stash: {e}")
+            }
+        })?;
     Ok(())
 }
 
@@ -2568,6 +2576,292 @@ pub fn get_commit_file_diff(
     let diff = repo
         .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut diff_opts))
         .map_err(|e| format!("Failed to generate commit diff: {e}"))?;
+
+    parse_git2_diff(&diff, clean_path)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComparisonCommitItem {
+    pub hash: String,
+    pub summary: String,
+    pub body: Option<String>,
+    pub author_name: String,
+    pub author_email: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchComparisonDetails {
+    pub base_ref: String,
+    pub compare_ref: String,
+    pub base_commit: String,
+    pub compare_commit: String,
+    pub merge_base_commit: String,
+    pub ahead: usize,
+    pub behind: usize,
+    pub total_additions: usize,
+    pub total_deletions: usize,
+    pub files: Vec<CommitFileChange>,
+    pub commits: Vec<ComparisonCommitItem>,
+}
+
+/// Helper to resolve a reference, branch shorthand, or commit hash to a git2::Commit
+pub fn resolve_commit_ref<'a>(repo: &'a Repository, ref_str: &str) -> Result<git2::Commit<'a>, String> {
+    let clean = ref_str.trim();
+    if let Ok(obj) = repo.revparse_single(clean) {
+        if let Ok(c) = obj.peel_to_commit() {
+            return Ok(c);
+        }
+    }
+    if let Ok(b) = repo.find_branch(clean, git2::BranchType::Local) {
+        if let Ok(c) = b.get().peel_to_commit() {
+            return Ok(c);
+        }
+    }
+    if let Ok(b) = repo.find_branch(clean, git2::BranchType::Remote) {
+        if let Ok(c) = b.get().peel_to_commit() {
+            return Ok(c);
+        }
+    }
+    let formats = [
+        format!("refs/heads/{clean}"),
+        format!("refs/remotes/{clean}"),
+        format!("refs/remotes/origin/{clean}"),
+        format!("refs/tags/{clean}"),
+    ];
+    for f in formats {
+        if let Ok(obj) = repo.revparse_single(&f) {
+            if let Ok(c) = obj.peel_to_commit() {
+                return Ok(c);
+            }
+        }
+    }
+    Err(format!("Could not resolve reference '{ref_str}' to a valid commit"))
+}
+
+/// Compare two branches (e.g. main vs feature branch for PR View)
+/// Computes merge base, ahead/behind commit counts, commit history in base..compare,
+/// and changed files with diff additions/deletions.
+/// If `include_uncommitted` is true and compare_ref is the active branch, factors in
+/// current working tree modifications, staged files, and untracked changes.
+pub fn get_branch_comparison(
+    repo: &Repository,
+    base_ref: &str,
+    compare_ref: &str,
+    include_uncommitted: bool,
+) -> Result<BranchComparisonDetails, String> {
+    let base_commit = resolve_commit_ref(repo, base_ref)?;
+    let compare_commit = resolve_commit_ref(repo, compare_ref)?;
+
+    let merge_base_oid = repo
+        .merge_base(base_commit.id(), compare_commit.id())
+        .unwrap_or_else(|_| base_commit.id());
+    let merge_base_commit = repo
+        .find_commit(merge_base_oid)
+        .unwrap_or_else(|_| base_commit.clone());
+
+    let (ahead, behind) = repo
+        .graph_ahead_behind(compare_commit.id(), base_commit.id())
+        .unwrap_or((0, 0));
+
+    let is_current_branch = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s == compare_ref || compare_ref == "HEAD"))
+        .unwrap_or(false);
+
+    // Commits in base..compare
+    let mut commits = Vec::new();
+
+    if include_uncommitted && is_current_branch {
+        let mut head_workdir_opts = git2::DiffOptions::new();
+        head_workdir_opts.include_untracked(true);
+        let compare_tree = compare_commit.tree().ok();
+        let has_uncommitted = repo
+            .diff_tree_to_workdir_with_index(compare_tree.as_ref(), Some(&mut head_workdir_opts))
+            .map(|d| d.deltas().len() > 0)
+            .unwrap_or(false);
+
+        if has_uncommitted {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
+            commits.push(ComparisonCommitItem {
+                hash: "uncommitted".to_string(),
+                summary: "Uncommitted changes (working tree & index)".to_string(),
+                body: Some("Local uncommitted modifications, staged files, and untracked changes".to_string()),
+                author_name: "You".to_string(),
+                author_email: "".to_string(),
+                timestamp: now,
+            });
+        }
+    }
+
+    if let Ok(mut revwalk) = repo.revwalk() {
+        revwalk.set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL).ok();
+        revwalk.push(compare_commit.id()).ok();
+        revwalk.hide(base_commit.id()).ok();
+
+        for oid_res in revwalk {
+            if let Ok(oid) = oid_res {
+                if let Ok(commit) = repo.find_commit(oid) {
+                    commits.push(ComparisonCommitItem {
+                        hash: oid.to_string(),
+                        summary: commit.summary().unwrap_or("No commit message").to_string(),
+                        body: commit.body().map(String::from),
+                        author_name: commit.author().name().unwrap_or("Unknown").to_string(),
+                        author_email: commit.author().email().unwrap_or("").to_string(),
+                        timestamp: commit.time().seconds(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Changed files between merge_base and compare (or workdir)
+    let merge_base_tree = merge_base_commit
+        .tree()
+        .map_err(|e| format!("Failed to get merge base tree: {e}"))?;
+    let compare_tree = compare_commit
+        .tree()
+        .map_err(|e| format!("Failed to get compare commit tree: {e}"))?;
+
+    let diff = if include_uncommitted && is_current_branch {
+        let mut diff_opts = git2::DiffOptions::new();
+        diff_opts.include_untracked(true);
+        diff_opts.recurse_untracked_dirs(true);
+        diff_opts.show_untracked_content(true);
+        repo.diff_tree_to_workdir_with_index(Some(&merge_base_tree), Some(&mut diff_opts))
+            .map_err(|e| format!("Failed to generate branch comparison diff with working tree: {e}"))?
+    } else {
+        let mut diff_opts = git2::DiffOptions::new();
+        repo.diff_tree_to_tree(
+            Some(&merge_base_tree),
+            Some(&compare_tree),
+            Some(&mut diff_opts),
+        )
+        .map_err(|e| format!("Failed to generate branch comparison diff: {e}"))?
+    };
+
+    let stats = diff.stats().ok();
+    let total_additions = stats.as_ref().map(|s| s.insertions()).unwrap_or(0);
+    let total_deletions = stats.as_ref().map(|s| s.deletions()).unwrap_or(0);
+
+    let mut files = Vec::new();
+    for (idx, delta) in diff.deltas().enumerate() {
+        let status = match delta.status() {
+            git2::Delta::Added => "added",
+            git2::Delta::Deleted => "deleted",
+            git2::Delta::Modified => "modified",
+            git2::Delta::Renamed => "renamed",
+            git2::Delta::Copied => "copied",
+            git2::Delta::Untracked => "untracked",
+            _ => "modified",
+        }
+        .to_string();
+
+        let new_file = delta.new_file();
+        let old_file = delta.old_file();
+
+        let path = new_file
+            .path()
+            .or_else(|| old_file.path())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+
+        let old_path = if delta.status() == git2::Delta::Renamed {
+            old_file
+                .path()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+        } else {
+            None
+        };
+
+        let mut additions = 0;
+        let mut deletions = 0;
+        if let Ok(Some(patch)) = git2::Patch::from_diff(&diff, idx) {
+            let (_, adds, dels) = patch.line_stats().unwrap_or((0, 0, 0));
+            additions = adds;
+            deletions = dels;
+        }
+
+        files.push(CommitFileChange {
+            path,
+            old_path,
+            status,
+            additions,
+            deletions,
+        });
+    }
+
+    Ok(BranchComparisonDetails {
+        base_ref: base_ref.to_string(),
+        compare_ref: compare_ref.to_string(),
+        base_commit: base_commit.id().to_string(),
+        compare_commit: compare_commit.id().to_string(),
+        merge_base_commit: merge_base_commit.id().to_string(),
+        ahead,
+        behind,
+        total_additions,
+        total_deletions,
+        files,
+        commits,
+    })
+}
+
+/// Generate structured FileDiff for a specific file between two branches (merge_base vs compare)
+pub fn get_branch_comparison_file_diff(
+    repo: &Repository,
+    base_ref: &str,
+    compare_ref: &str,
+    target_path: &str,
+    include_uncommitted: bool,
+) -> Result<FileDiff, String> {
+    let base_commit = resolve_commit_ref(repo, base_ref)?;
+    let compare_commit = resolve_commit_ref(repo, compare_ref)?;
+
+    let merge_base_oid = repo
+        .merge_base(base_commit.id(), compare_commit.id())
+        .unwrap_or_else(|_| base_commit.id());
+    let merge_base_commit = repo
+        .find_commit(merge_base_oid)
+        .unwrap_or_else(|_| base_commit.clone());
+
+    let merge_base_tree = merge_base_commit
+        .tree()
+        .map_err(|e| format!("Failed to get merge base tree: {e}"))?;
+    let compare_tree = compare_commit
+        .tree()
+        .map_err(|e| format!("Failed to get compare commit tree: {e}"))?;
+
+    let clean_path = target_path.replace('\\', "/");
+    let clean_path = clean_path.trim_start_matches('/');
+
+    let is_current_branch = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s == compare_ref || compare_ref == "HEAD"))
+        .unwrap_or(false);
+
+    let mut diff_opts = git2::DiffOptions::new();
+    diff_opts.pathspec(clean_path);
+
+    let diff = if include_uncommitted && is_current_branch {
+        diff_opts.include_untracked(true);
+        diff_opts.recurse_untracked_dirs(true);
+        diff_opts.show_untracked_content(true);
+        repo.diff_tree_to_workdir_with_index(Some(&merge_base_tree), Some(&mut diff_opts))
+            .map_err(|e| format!("Failed to generate branch comparison file diff: {e}"))?
+    } else {
+        repo.diff_tree_to_tree(
+            Some(&merge_base_tree),
+            Some(&compare_tree),
+            Some(&mut diff_opts),
+        )
+        .map_err(|e| format!("Failed to generate branch comparison file diff: {e}"))?
+    };
 
     parse_git2_diff(&diff, clean_path)
 }
@@ -3176,6 +3470,95 @@ mod tests {
 
         let final_content = std::fs::read_to_string(&file_path).unwrap();
         assert_eq!(final_content.replace("\r\n", "\n"), "line 1\nline 2 mod A\nline 3\n");
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_branch_comparison() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_compare_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+        let sig = git2::Signature::now("Shark", "shark@ocean.dev").unwrap();
+
+        // 1. Initial commit on main
+        let file_path = test_dir.join("main.txt");
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "Initial base line").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("main.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let init_commit = repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+        let init_commit_obj = repo.find_commit(init_commit).unwrap();
+        drop(tree);
+        drop(index);
+
+        let _ = repo.branch("main", &init_commit_obj, true);
+
+        // 2. Create feature branch
+        let feature_b = repo.branch("feature/pr-view", &init_commit_obj, false).unwrap();
+        drop(feature_b);
+
+        // 3. Add commit on feature branch
+        let feat_file = test_dir.join("feature.txt");
+        let mut ff = File::create(&feat_file).unwrap();
+        writeln!(ff, "Feature content line 1\nFeature content line 2").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("feature.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let _feat_commit = repo.commit(
+            Some("refs/heads/feature/pr-view"),
+            &sig,
+            &sig,
+            "Add feature support",
+            &tree,
+            &[&init_commit_obj],
+        ).unwrap();
+        drop(tree);
+        drop(index);
+
+        // 4. Run get_branch_comparison (committed only)
+        let comparison = get_branch_comparison(&repo, "main", "feature/pr-view", false).unwrap();
+        assert_eq!(comparison.base_ref, "main");
+        assert_eq!(comparison.compare_ref, "feature/pr-view");
+        assert_eq!(comparison.ahead, 1);
+        assert_eq!(comparison.behind, 0);
+        assert_eq!(comparison.commits.len(), 1);
+        assert_eq!(comparison.commits[0].summary, "Add feature support");
+        assert_eq!(comparison.files.len(), 1);
+        assert_eq!(comparison.files[0].path, "feature.txt");
+        assert_eq!(comparison.files[0].status, "added");
+        assert_eq!(comparison.total_additions, 2);
+        assert_eq!(comparison.total_deletions, 0);
+
+        // 5. Test get_branch_comparison_file_diff
+        let file_diff = get_branch_comparison_file_diff(&repo, "main", "feature/pr-view", "feature.txt", false).unwrap();
+        assert_eq!(file_diff.new_path.as_deref(), Some("feature.txt"));
+        assert!(!file_diff.hunks.is_empty());
+
+        // 6. Switch HEAD to feature branch and add uncommitted changes
+        repo.set_head("refs/heads/feature/pr-view").unwrap();
+        let mut checkout_builder = git2::build::CheckoutBuilder::new();
+        checkout_builder.force();
+        repo.checkout_head(Some(&mut checkout_builder)).unwrap();
+
+        let uncommitted_file = test_dir.join("wip.txt");
+        let mut uf = File::create(&uncommitted_file).unwrap();
+        writeln!(uf, "WIP uncommitted line").unwrap();
+
+        let comparison_with_uncommitted = get_branch_comparison(&repo, "main", "feature/pr-view", true).unwrap();
+        assert_eq!(comparison_with_uncommitted.files.len(), 2);
+        assert!(comparison_with_uncommitted.files.iter().any(|f| f.path == "wip.txt"));
+        assert!(comparison_with_uncommitted.commits.iter().any(|c| c.hash == "uncommitted"));
+
+        let uncommitted_diff = get_branch_comparison_file_diff(&repo, "main", "feature/pr-view", "wip.txt", true).unwrap();
+        assert_eq!(uncommitted_diff.new_path.as_deref(), Some("wip.txt"));
+        assert!(!uncommitted_diff.hunks.is_empty());
 
         let _ = fs::remove_dir_all(&test_dir);
     }

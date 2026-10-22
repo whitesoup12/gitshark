@@ -819,42 +819,82 @@ pub async fn execute_git_push(
     force: Option<bool>,
     set_upstream: Option<bool>,
 ) -> Result<(), String> {
-    let (pty_manager, workdir, auto_upstream, current_branch_name, default_remote) = {
+    let (
+        pty_manager,
+        workdir,
+        auto_upstream,
+        resolved_branch_name,
+        target_remote,
+        upstream_merge_name,
+    ) = {
         let registry = state.read();
         let session = registry
             .get(&repo_id)
             .ok_or_else(|| format!("Session not found: {repo_id}"))?;
 
         let repo = session.repo.lock();
-        let mut auto_up = false;
         let mut cur_branch = None;
-        let mut remote_target = None;
+        let mut default_remote = "origin".to_string();
+        let mut upstream_remote = None;
+        let mut upstream_merge = None;
+        let mut has_upstream = false;
 
         if let Ok(head) = repo.head() {
             if head.is_branch() {
                 if let Some(bname) = head.shorthand() {
                     cur_branch = Some(bname.to_string());
-                    if let Ok(local_b) = repo.find_branch(bname, git2::BranchType::Local) {
-                        if local_b.upstream().is_err() {
-                            auto_up = true;
-                        }
-                    }
                 }
             }
         }
 
         if let Ok(remotes) = repo.remotes() {
             if let Some(first_remote) = remotes.get(0) {
-                remote_target = Some(first_remote.to_string());
+                default_remote = first_remote.to_string();
             }
         }
+
+        let push_branch = branch.as_deref().or(cur_branch.as_deref());
+
+        if let Some(bname) = push_branch {
+            if let Ok(local_b) = repo.find_branch(bname, git2::BranchType::Local) {
+                if let Ok(upstream) = local_b.upstream() {
+                    has_upstream = true;
+                    if let Some(ref_name) = local_b.get().name() {
+                        if let Ok(buf) = repo.branch_upstream_remote(ref_name) {
+                            if let Some(s) = buf.as_str() {
+                                upstream_remote = Some(s.to_string());
+                            }
+                        }
+                        if let Ok(buf) = repo.branch_upstream_merge(ref_name) {
+                            if let Some(s) = buf.as_str() {
+                                let short = s.strip_prefix("refs/heads/").unwrap_or(s);
+                                upstream_merge = Some(short.to_string());
+                            }
+                        }
+                    }
+                    if upstream_remote.is_none() {
+                        if let Some(shorthand) = upstream.get().shorthand() {
+                            if let Some((rem, mrg)) = shorthand.split_once('/') {
+                                upstream_remote = Some(rem.to_string());
+                                upstream_merge = Some(mrg.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let chosen_remote = remote
+            .or(upstream_remote)
+            .unwrap_or(default_remote);
 
         (
             session.pty_manager.clone(),
             session.path.clone(),
-            auto_up,
-            cur_branch,
-            remote_target.unwrap_or_else(|| "origin".to_string()),
+            !has_upstream,
+            push_branch.map(String::from),
+            chosen_remote,
+            upstream_merge,
         )
     };
 
@@ -867,15 +907,23 @@ pub async fn execute_git_push(
     let should_set_upstream = set_upstream.unwrap_or(auto_upstream);
     if should_set_upstream {
         args.push("--set-upstream".to_string());
-        args.push(remote.unwrap_or(default_remote));
-        if let Some(b) = branch.or(current_branch_name) {
+        args.push(target_remote);
+        if let Some(b) = resolved_branch_name {
             args.push(b);
         }
     } else {
-        if let Some(r) = remote {
-            args.push(r);
-            if let Some(b) = branch {
-                args.push(b);
+        args.push(target_remote);
+        if let Some(local_b) = resolved_branch_name {
+            if let Some(upstream_mrg) = upstream_merge_name {
+                if upstream_mrg != local_b {
+                    // Upstream remote branch has a different name than local branch (Issue #38)
+                    // Push explicit refspec: <local_branch>:<upstream_branch>
+                    args.push(format!("{local_b}:{upstream_mrg}"));
+                } else {
+                    args.push(local_b);
+                }
+            } else {
+                args.push(local_b);
             }
         }
     }
@@ -1696,12 +1744,55 @@ pub async fn create_stash(
     message: Option<String>,
     include_untracked: bool,
 ) -> Result<(), String> {
-    let registry = state.read();
-    let session = registry
-        .get(&repo_id)
-        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
-    let mut repo = session.repo.lock();
-    git::create_stash(&mut *repo, message.as_deref(), include_untracked)
+    let (workdir, git_cmd) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+        (session.path.clone(), resolve_git_command())
+    };
+
+    let res = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+        let mut repo = session.repo.lock();
+        git::create_stash(&mut *repo, message.as_deref(), include_untracked)
+    };
+
+    match res {
+        Ok(()) => Ok(()),
+        Err(e) if e.contains("No local changes to stash") => Err(e),
+        Err(orig_err) => {
+            // Fallback to Git CLI (e.g. for linked worktrees or edge cases where libgit2 fails)
+            let mut cmd = std::process::Command::new(&git_cmd);
+            cmd.current_dir(&workdir);
+            cmd.arg("stash").arg("push");
+            if include_untracked {
+                cmd.arg("--include-untracked");
+            }
+            if let Some(ref m) = message {
+                if !m.trim().is_empty() {
+                    cmd.arg("-m").arg(m.trim());
+                }
+            }
+            match cmd.output() {
+                Ok(output) if output.status.success() => Ok(()),
+                Ok(output) => {
+                    let err_str = String::from_utf8_lossy(&output.stderr);
+                    if err_str.contains("No local changes to save")
+                        || err_str.contains("nothing to stash")
+                    {
+                        Err("No local changes to stash.".to_string())
+                    } else {
+                        Err(format!("Stash failed: {orig_err} | CLI: {err_str}"))
+                    }
+                }
+                Err(_) => Err(orig_err),
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -1789,6 +1880,50 @@ pub async fn get_commit_file_diff(
         .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
     let repo = session.repo.lock();
     git::get_commit_file_diff(&repo, &commit_sha, &file_path)
+}
+
+#[tauri::command]
+pub async fn get_branch_comparison(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    base_ref: String,
+    compare_ref: String,
+    include_uncommitted: Option<bool>,
+) -> Result<git::BranchComparisonDetails, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::get_branch_comparison(
+        &repo,
+        &base_ref,
+        &compare_ref,
+        include_uncommitted.unwrap_or(false),
+    )
+}
+
+#[tauri::command]
+pub async fn get_branch_comparison_file_diff(
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    base_ref: String,
+    compare_ref: String,
+    file_path: String,
+    include_uncommitted: Option<bool>,
+) -> Result<git::FileDiff, String> {
+    let registry = state.read();
+    let session = registry
+        .get(&repo_id)
+        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+    let repo = session.repo.lock();
+    git::get_branch_comparison_file_diff(
+        &repo,
+        &base_ref,
+        &compare_ref,
+        &file_path,
+        include_uncommitted.unwrap_or(false),
+    )
 }
 
 #[tauri::command]

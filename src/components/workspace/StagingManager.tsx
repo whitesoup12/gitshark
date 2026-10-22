@@ -369,7 +369,9 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
   const handleSaveStash = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tab || isSubmittingStash) return;
+    const changesToStash =
+      stagedCount + unstagedCount + (stashIncludeUntracked ? untrackedCount : 0);
+    if (!tab || isSubmittingStash || changesToStash === 0) return;
 
     setIsSubmittingStash(true);
     try {
@@ -475,7 +477,15 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
 
             <button
               type="submit"
-              disabled={isSubmittingStash}
+              disabled={
+                isSubmittingStash ||
+                stagedCount + unstagedCount + (stashIncludeUntracked ? untrackedCount : 0) === 0
+              }
+              title={
+                stagedCount + unstagedCount + (stashIncludeUntracked ? untrackedCount : 0) === 0
+                  ? "No changes to stash"
+                  : undefined
+              }
               className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-medium text-[10px]"
             >
               {isSubmittingStash ? (

@@ -20,14 +20,15 @@ import {
 interface DiffViewerProps {
   diff: FileDiff | null;
   filePath: string | null;
-  isStaged: boolean;
-  onStageHunk: (patch: string) => void;
+  isStaged?: boolean;
+  onStageHunk?: (patch: string) => void;
   onUnstageHunk?: (hunk: DiffHunk) => void;
   onDiscardHunk?: (hunk: DiffHunk) => void;
   onStageLines?: (hunk: DiffHunk, lineIndices: number[]) => void;
   onUnstageLines?: (hunk: DiffHunk, lineIndices: number[]) => void;
   onDiscardLines?: (hunk: DiffHunk, lineIndices: number[]) => void;
-  onToggleStageFile: () => void;
+  onToggleStageFile?: () => void;
+  readOnly?: boolean;
   isLoading?: boolean;
   isRefreshing?: boolean;
   repoId?: string | null;
@@ -37,7 +38,7 @@ interface DiffViewerProps {
 export const DiffViewer: React.FC<DiffViewerProps> = ({
   diff,
   filePath,
-  isStaged,
+  isStaged = false,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
@@ -45,6 +46,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onUnstageLines,
   onDiscardLines,
   onToggleStageFile,
+  readOnly = false,
   isLoading = false,
   isRefreshing = false,
   repoId,
@@ -241,6 +243,24 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     setSelectedLines(new Map());
   };
 
+  if (!filePath) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-shark-950 text-slate-400 p-8 select-none">
+        <div className="max-w-sm text-center space-y-3">
+          <div className="w-12 h-12 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center mx-auto text-sky-400">
+            <FileCode className="w-6 h-6" />
+          </div>
+          <h3 className="text-sm font-semibold text-slate-200">
+            No File Selected
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Select a modified or staged file from the left drawer to review line-by-line diff hunks, stage individual lines or patches, or discard changes.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading && !diff) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-shark-950 text-slate-400 gap-2">
@@ -250,7 +270,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     );
   }
 
-  if (!filePath || !diff) {
+  if (!diff) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-shark-950 text-slate-400 p-8 select-none">
         <div className="max-w-sm text-center space-y-3">
@@ -383,26 +403,28 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
 
           {/* Quick Stage / Unstage Button */}
-          <button
-            onClick={onToggleStageFile}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors border shadow-sm ${
-              isStaged
-                ? "bg-shark-850 hover:bg-shark-800 text-slate-200 border-shark-750"
-                : "bg-sky-500 hover:bg-sky-400 text-slate-950 border-sky-400"
-            }`}
-          >
-            {isStaged ? (
-              <>
-                <Minus className="w-3 h-3" />
-                <span>Unstage File</span>
-              </>
-            ) : (
-              <>
-                <Plus className="w-3 h-3" />
-                <span>Stage File</span>
-              </>
-            )}
-          </button>
+          {!readOnly && onToggleStageFile && (
+            <button
+              onClick={onToggleStageFile}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors border shadow-sm ${
+                isStaged
+                  ? "bg-shark-850 hover:bg-shark-800 text-slate-200 border-shark-750"
+                  : "bg-sky-500 hover:bg-sky-400 text-slate-950 border-sky-400"
+              }`}
+            >
+              {isStaged ? (
+                <>
+                  <Minus className="w-3 h-3" />
+                  <span>Unstage File</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-3 h-3" />
+                  <span>Stage File</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -434,7 +456,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 <div className="flex items-center justify-between px-3 py-1.5 bg-shark-850 border-b border-shark-800 text-slate-400 select-none">
                   <div className="flex items-center gap-2">
                     {/* Hunk select-all checkbox */}
-                    {modifiableLinesCount > 0 && (
+                    {!readOnly && modifiableLinesCount > 0 && (
                       <button
                         onClick={() => handleToggleHunkSelection(hunkIdx, hunk)}
                         className="text-slate-400 hover:text-sky-300 transition-colors mr-1"
@@ -463,77 +485,79 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   </div>
 
                   {/* Actions for this hunk */}
-                  <div className="flex items-center gap-1.5">
-                    {/* If lines are selected in this hunk: Stage/Discard Selected */}
-                    {hunkSelectedLines.size > 0 ? (
-                      <>
-                        {!isStaged ? (
-                          <>
-                            {onDiscardLines && (
+                  {!readOnly && onStageHunk && (
+                    <div className="flex items-center gap-1.5">
+                      {/* If lines are selected in this hunk: Stage/Discard Selected */}
+                      {hunkSelectedLines.size > 0 ? (
+                        <>
+                          {!isStaged ? (
+                            <>
+                              {onDiscardLines && (
+                                <button
+                                  onClick={() => handleDiscardHunkSelected(hunkIdx, hunk)}
+                                  className="px-2 py-0.5 rounded text-[10px] bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/60 transition-colors"
+                                  title="Discard selected lines in this hunk"
+                                >
+                                  Discard Selected ({hunkSelectedLines.size})
+                                </button>
+                              )}
                               <button
-                                onClick={() => handleDiscardHunkSelected(hunkIdx, hunk)}
-                                className="px-2 py-0.5 rounded text-[10px] bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/60 transition-colors"
-                                title="Discard selected lines in this hunk"
+                                onClick={() => handleStageHunkSelected(hunkIdx, hunk)}
+                                className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold transition-colors shadow-sm"
+                                title="Stage selected lines in this hunk"
                               >
-                                Discard Selected ({hunkSelectedLines.size})
+                                <Plus className="w-2.5 h-2.5" />
+                                <span>Stage Selected ({hunkSelectedLines.size})</span>
                               </button>
-                            )}
+                            </>
+                          ) : (
                             <button
-                              onClick={() => handleStageHunkSelected(hunkIdx, hunk)}
-                              className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold transition-colors shadow-sm"
-                              title="Stage selected lines in this hunk"
+                              onClick={() => handleUnstageHunkSelected(hunkIdx, hunk)}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-shark-750 hover:bg-shark-700 text-slate-200 border border-shark-650 transition-colors"
+                              title="Unstage selected lines in this hunk"
                             >
-                              <Plus className="w-2.5 h-2.5" />
-                              <span>Stage Selected ({hunkSelectedLines.size})</span>
+                              <Minus className="w-2.5 h-2.5" />
+                              <span>Unstage Selected ({hunkSelectedLines.size})</span>
                             </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => handleUnstageHunkSelected(hunkIdx, hunk)}
-                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-shark-750 hover:bg-shark-700 text-slate-200 border border-shark-650 transition-colors"
-                            title="Unstage selected lines in this hunk"
-                          >
-                            <Minus className="w-2.5 h-2.5" />
-                            <span>Unstage Selected ({hunkSelectedLines.size})</span>
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      /* Whole Hunk Actions */
-                      <>
-                        {!isStaged ? (
-                          <>
-                            {onDiscardHunk && (
+                          )}
+                        </>
+                      ) : (
+                        /* Whole Hunk Actions */
+                        <>
+                          {!isStaged ? (
+                            <>
+                              {onDiscardHunk && (
+                                <button
+                                  onClick={() => onDiscardHunk(hunk)}
+                                  className="px-2 py-0.5 rounded text-[10px] bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-800/40 transition-colors"
+                                  title="Discard this hunk from working tree"
+                                >
+                                  Discard Hunk
+                                </button>
+                              )}
                               <button
-                                onClick={() => onDiscardHunk(hunk)}
-                                className="px-2 py-0.5 rounded text-[10px] bg-rose-950/50 hover:bg-rose-900 text-rose-300 border border-rose-800/40 transition-colors"
-                                title="Discard this hunk from working tree"
+                                onClick={() => onStageHunk(hunk.patch)}
+                                className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold transition-colors shadow-sm"
+                                title="Stage only this hunk to index"
                               >
-                                Discard Hunk
+                                <Plus className="w-2.5 h-2.5" />
+                                <span>Stage Hunk</span>
                               </button>
-                            )}
+                            </>
+                          ) : (
                             <button
-                              onClick={() => onStageHunk(hunk.patch)}
-                              className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold transition-colors shadow-sm"
-                              title="Stage only this hunk to index"
+                              onClick={() => onUnstageHunk ? onUnstageHunk(hunk) : onStageHunk(hunk.patch)}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-shark-750 hover:bg-shark-700 text-slate-200 border border-shark-700 transition-colors"
+                              title="Unstage this hunk"
                             >
-                              <Plus className="w-2.5 h-2.5" />
-                              <span>Stage Hunk</span>
+                              <Minus className="w-2.5 h-2.5" />
+                              <span>Unstage Hunk</span>
                             </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => onUnstageHunk ? onUnstageHunk(hunk) : onStageHunk(hunk.patch)}
-                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-shark-750 hover:bg-shark-700 text-slate-200 border border-shark-700 transition-colors"
-                            title="Unstage this hunk"
-                          >
-                            <Minus className="w-2.5 h-2.5" />
-                            <span>Unstage Hunk</span>
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Hunk Lines Rendering */}

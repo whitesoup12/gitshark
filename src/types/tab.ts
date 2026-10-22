@@ -3,7 +3,7 @@ import { RepoHooksInfo, HookExecutionState } from "./hooks";
 import { WorktreeItem } from "./worktree";
 import { RemoteSyncStatus, PullRequestInfo } from "./remote";
 
-export type WorkspaceView = "graph" | "diff" | "status";
+export type WorkspaceView = "graph" | "diff" | "status" | "pr";
 
 export interface Tab {
   id: string;
@@ -20,6 +20,11 @@ export interface Tab {
   sidebarCollapsed: boolean;
   selectedCommitHash: string | null;
   selectedFilePath: string | null;
+
+  // Branch comparison / PR View state
+  prCompareBase?: string;
+  prCompareTarget?: string;
+  prSelectedFile?: string | null;
 
   // Hook state and configuration
   hooksInfo?: RepoHooksInfo;
