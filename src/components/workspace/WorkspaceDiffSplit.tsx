@@ -258,7 +258,6 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
     if (!tab.repoId) return;
     await discardFileChangesIpc(tab.repoId, path);
     const fileName = path.split(/[/\\]/).pop() || path;
-    useSharkStore.getState().recordSharkStat("chomp", 1);
     useSharkStore
       .getState()
       .triggerCelebration("chomp", `Chomped changes in ${fileName}! 🦈`);
@@ -276,7 +275,6 @@ export const WorkspaceDiffSplit: React.FC<WorkspaceDiffSplitProps> = ({ tab }) =
       status.unstaged.length + status.untracked.length
     );
     await discardAllUnstagedChangesIpc(tab.repoId);
-    useSharkStore.getState().recordSharkStat("chomp", chompCount);
     useSharkStore
       .getState()
       .triggerCelebration(

@@ -112,7 +112,7 @@ interface WorkspaceState {
 
   // Milestone 5: Worktrees & Remote Sync
   fetchWorktrees: (tabId: string) => Promise<WorktreeItem[]>;
-  addWorktree: (tabId: string, path: string, branch: string, newBranch?: boolean) => Promise<boolean>;
+  addWorktree: (tabId: string, path: string, branch: string, newBranch?: boolean, noTrack?: boolean) => Promise<boolean>;
   removeWorktree: (tabId: string, path: string, force?: boolean) => Promise<boolean>;
   pruneWorktrees: (tabId: string) => Promise<boolean>;
   fetchRemoteSyncStatus: (tabId: string) => Promise<RemoteSyncStatus | null>;
@@ -1655,13 +1655,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     tabId: string,
     path: string,
     branch: string,
-    newBranch: boolean = false
+    newBranch: boolean = false,
+    noTrack: boolean = true
   ) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
     try {
-      await addWorktreeIpc(tab.repoId, path, branch, newBranch);
+      await addWorktreeIpc(tab.repoId, path, branch, newBranch, noTrack);
       await get().fetchWorktrees(tabId);
       await get().refreshTabMetadata(tabId);
       return true;

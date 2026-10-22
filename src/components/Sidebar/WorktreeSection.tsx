@@ -44,7 +44,8 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [newBranch, setNewBranch] = useState("");
-  const [createBranch, setCreateBranch] = useState(false);
+  const [createBranch, setCreateBranch] = useState(true);
+  const [noTrack, setNoTrack] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [copiedPath, setCopiedPath] = useState(false);
@@ -82,7 +83,8 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
         tab.id,
         newPath.trim(),
         newBranch.trim(),
-        createBranch
+        createBranch,
+        noTrack
       );
       if (success) {
         setNewPath("");
@@ -233,16 +235,33 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
                 />
               </div>
 
-              {/* Create new branch toggle */}
-              <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={createBranch}
-                  onChange={(e) => setCreateBranch(e.target.checked)}
-                  className="rounded bg-shark-900 border-shark-700 text-sky-500"
-                />
-                <span>Create new branch (-b)</span>
-              </label>
+              {/* Create new branch toggle & No-track */}
+              <div className="space-y-1.5 pt-0.5">
+                <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createBranch}
+                    onChange={(e) => setCreateBranch(e.target.checked)}
+                    className="rounded bg-shark-900 border-shark-700 text-sky-500"
+                  />
+                  <span>Create new branch (-b)</span>
+                </label>
+
+                {createBranch && (
+                  <label
+                    className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer pl-4"
+                    title="Do not set up tracking for the new branch. Prevents accidentally pushing changes back into the base/parent branch."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={noTrack}
+                      onChange={(e) => setNoTrack(e.target.checked)}
+                      className="rounded bg-shark-900 border-shark-700 text-sky-500"
+                    />
+                    <span>No tracking (--no-track, recommended)</span>
+                  </label>
+                )}
+              </div>
 
               {/* Submit Buttons */}
               <div className="flex items-center justify-end gap-1.5 pt-1">
