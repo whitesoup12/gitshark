@@ -1,33 +1,50 @@
-[package]
-name = "gitshark"
-version = "1.8.1"
-description = "GitShark: Fast desktop Git client built with Tauri v2 and Rust"
-authors = ["GitShark Team"]
-edition = "2021"
-
-[lib]
-name = "gitshark_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-[build-dependencies]
-tauri-build = { version = "2.0", features = [] }
-
-[dependencies]
-tauri = { version = "2.2", features = [] }
-tauri-plugin-dialog = "2.2"
-tauri-plugin-shell = "2.2"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-portable-pty = "0.8"
-parking_lot = "0.12"
-tokio = { version = "1.40", features = ["full"] }
-uuid = { version = "1.10", features = ["v4", "serde"] }
-thiserror = "2.0"
-log = "0.4"
-notify = "6.1"
-
-[target.'cfg(not(windows))'.dependencies]
-git2 = { version = "0.20", features = ["vendored-libgit2", "vendored-openssl"] }
-
-[target.'cfg(windows)'.dependencies]
-git2 = { version = "0.20", features = ["vendored-libgit2"] }
+{
+  "name": "gitshark",
+  "private": true,
+  "version": "1.8.1",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/run-tauri.mjs dev",
+    "desktop": "node scripts/run-tauri.mjs dev",
+    "dev:ui": "vite",
+    "dev:web": "vite",
+    "build": "tsc && vite build",
+    "build:desktop": "node scripts/run-tauri.mjs build",
+    "preview": "vite preview",
+    "tauri": "node scripts/run-tauri.mjs",
+    "package": "node scripts/package.mjs",
+    "package:mac": "node scripts/package-mac.mjs",
+    "package:brew": "node scripts/package-mac.mjs",
+    "package:win": "node scripts/package-win.mjs",
+    "package:portable": "node scripts/package-win.mjs",
+    "package:scoop": "node scripts/package-win.mjs",
+    "bump": "node scripts/bump-version.mjs",
+    "check:version": "node scripts/verify-version.mjs",
+    "setup:hooks": "node scripts/install-hooks.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.475.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.0.1",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
