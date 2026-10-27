@@ -2944,27 +2944,25 @@ pub fn create_tag(
 
     let target_oid_str = target_obj.id().to_string();
 
-    match message {
-        Some(msg) if !msg.trim().is_empty() => {
-            let sig = repo
-                .signature()
-                .or_else(|_| git2::Signature::now("GitShark User", "user@gitshark.local"))
-                .map_err(|e| format!("Failed to create signature for tag: {e}"))?;
-            repo.tag(clean_name, &target_obj, &sig, msg.trim(), false)
-                .map_err(|e| format!("Failed to create annotated tag '{clean_name}': {e}"))?;
-        }
-        _ => {
-            repo.tag_lightweight(clean_name, &target_obj, false)
-                .map_err(|e| format!("Failed to create tag '{clean_name}': {e}"))?;
-        }
-    }
+    let sig = repo
+        .signature()
+        .or_else(|_| git2::Signature::now("GitShark User", "user@gitshark.local"))
+        .map_err(|e| format!("Failed to create signature for tag: {e}"))?;
+
+    let tag_message = match message {
+        Some(msg) if !msg.trim().is_empty() => msg.trim(),
+        _ => clean_name,
+    };
+
+    repo.tag(clean_name, &target_obj, &sig, tag_message, false)
+        .map_err(|e| format!("Failed to create annotated tag '{clean_name}': {e}"))?;
 
     Ok(GitTagItem {
         name: clean_name.to_string(),
         target_commit: target_oid_str,
-        message: message.filter(|m| !m.trim().is_empty()).map(|m| m.trim().to_string()),
-        tagger: None,
-        tagger_date: None,
+        message: Some(tag_message.to_string()),
+        tagger: sig.name().map(String::from),
+        tagger_date: Some(sig.when().seconds()),
     })
 }
 

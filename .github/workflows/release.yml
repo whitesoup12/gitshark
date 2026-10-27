@@ -156,6 +156,8 @@ jobs:
         run: |
           find dist-release -mindepth 2 -type f -exec mv {} dist-release/ \; 2>/dev/null || true
           node scripts/package-mac.mjs --manifests-only
+          cp Casks/gitshark.rb dist-release/gitshark.rb
+          cp packaging/scoop/gitshark.json dist-release/gitshark.json
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -167,9 +169,8 @@ jobs:
             dist-release/*.exe
             dist-release/*.dmg
             dist-release/SHA256SUMS.txt
-            packaging/scoop/gitshark.json
-            packaging/homebrew/gitshark.rb
-            Casks/gitshark.rb
+            dist-release/gitshark.json
+            dist-release/gitshark.rb
           generate_release_notes: true
           draft: ${{ github.event.inputs.draft || false }}
           prerelease: false
