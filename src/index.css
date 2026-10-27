@@ -178,3 +178,12 @@
   animation: chompShockwave 2.4s ease-out forwards;
 }
 
+
+/* Hide scrollbars across browsers */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

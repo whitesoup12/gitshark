@@ -1,7 +1,15 @@
-import React from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { TabItem } from "./TabItem";
-import { Terminal as TerminalIcon, Download, Globe, GitPullRequest, Search } from "lucide-react";
+import {
+  Terminal as TerminalIcon,
+  Download,
+  Globe,
+  GitPullRequest,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { SyncButton } from "./SyncButton";
 import { OpenRepoDropdown } from "./OpenRepoDropdown";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
@@ -25,10 +33,83 @@ export const TabBar: React.FC = () => {
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = useCallback(() => {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 2);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+
+  // Update scroll navigation buttons on scroll, resize, or tab list change
+  useEffect(() => {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+
+    checkScroll();
+    el.addEventListener("scroll", checkScroll, { passive: true });
+    window.addEventListener("resize", checkScroll);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => checkScroll());
+      ro.observe(el);
+    }
+
+    return () => {
+      el.removeEventListener("scroll", checkScroll);
+      window.removeEventListener("resize", checkScroll);
+      if (ro) ro.disconnect();
+    };
+  }, [tabs, checkScroll]);
+
+  // Support horizontal wheel scrolling across any mouse
+  useEffect(() => {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta !== 0) {
+        e.preventDefault();
+        el.scrollLeft += delta;
+      }
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handleWheel);
+    };
+  }, []);
+
+  // Auto-scroll active tab into view when active tab changes
+  useEffect(() => {
+    if (!activeTabId || !tabsScrollRef.current) return;
+    const activeEl = tabsScrollRef.current.querySelector<HTMLElement>('[data-active-tab="true"]');
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+    }
+    const timer = setTimeout(checkScroll, 120);
+    return () => clearTimeout(timer);
+  }, [activeTabId, checkScroll]);
+
+  const scrollTabs = (direction: "left" | "right") => {
+    const el = tabsScrollRef.current;
+    if (!el) return;
+    const amount = Math.max(160, el.clientWidth * 0.45);
+    el.scrollBy({
+      left: direction === "left" ? -amount : amount,
+      behavior: "smooth",
+    });
+  };
+
   return (
-    <header className="flex items-center justify-between bg-shark-950 border-b border-shark-800 h-10 select-none px-2 z-20">
-      {/* Left side: Tabs container */}
-      <div className="flex items-center h-full max-w-[calc(100vw-220px)] min-w-0">
+    <header className="flex items-center justify-between bg-shark-950 border-b border-shark-800 h-10 select-none px-2 z-20 gap-2 w-full overflow-hidden">
+      {/* Left side: Logo + Scrollable tabs strip */}
+      <div className="flex items-center h-full flex-1 min-w-0">
         {/* App Logo / Mark + Shark Rank Pill */}
         <button
           onClick={() => openWisdom()}
@@ -47,8 +128,23 @@ export const TabBar: React.FC = () => {
           </span>
         </button>
 
-        {/* Tab Items List (scrollable) */}
-        <div className="flex items-center h-full overflow-x-auto no-scrollbar flex-shrink min-w-0">
+        {/* Scroll Left Chevron Button */}
+        {canScrollLeft && (
+          <button
+            onClick={() => scrollTabs("left")}
+            className="flex items-center justify-center w-5 h-7 flex-shrink-0 bg-shark-900 hover:bg-shark-800 text-slate-400 hover:text-slate-100 border border-shark-750 rounded-l transition-all shadow-sm z-10 mr-0.5"
+            title="Scroll tabs left"
+            aria-label="Scroll tabs left"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {/* Tab Items List (horizontally scrollable with mouse wheel or chevrons) */}
+        <div
+          ref={tabsScrollRef}
+          className="flex items-center h-full overflow-x-auto no-scrollbar scroll-smooth flex-1 min-w-0"
+        >
           {tabs.map((tab) => (
             <TabItem
               key={tab.id}
@@ -60,8 +156,20 @@ export const TabBar: React.FC = () => {
           ))}
         </div>
 
+        {/* Scroll Right Chevron Button */}
+        {canScrollRight && (
+          <button
+            onClick={() => scrollTabs("right")}
+            className="flex items-center justify-center w-5 h-7 flex-shrink-0 bg-shark-900 hover:bg-shark-800 text-slate-400 hover:text-slate-100 border border-shark-750 rounded-r transition-all shadow-sm z-10 ml-0.5"
+            title="Scroll tabs right"
+            aria-label="Scroll tabs right"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        )}
+
         {/* Fixed Action Controls */}
-        <div className="flex items-center flex-shrink-0">
+        <div className="flex items-center flex-shrink-0 ml-1">
           {/* Open Repository Dropdown */}
           <OpenRepoDropdown />
 
@@ -80,7 +188,7 @@ export const TabBar: React.FC = () => {
       {/* Middle: Command Palette Quick Search Launcher */}
       <button
         onClick={() => useCommandPaletteStore.getState().open()}
-        className="hidden md:flex items-center gap-2 h-7 px-2.5 rounded-md bg-shark-900/90 hover:bg-shark-850 border border-shark-800 hover:border-shark-700 text-slate-400 hover:text-slate-200 transition-all text-xs mx-2 shadow-sm"
+        className="hidden xl:flex items-center gap-2 h-7 px-2.5 rounded-md bg-shark-900/90 hover:bg-shark-850 border border-shark-800 hover:border-shark-700 text-slate-400 hover:text-slate-200 transition-all text-xs mx-2 shadow-sm flex-shrink-0"
         title="Open Command Palette (Cmd+K / Ctrl+P)"
       >
         <Search className="w-3.5 h-3.5 text-sky-400" />

@@ -18,6 +18,9 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
   build-windows:
     name: Build & Package Windows (x64)
@@ -54,7 +57,7 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build & Package Windows Executables
-        run: npm run package:win
+        run: node scripts/package-win.mjs
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
@@ -130,10 +133,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Code (Main Branch for Manifest Updates)
         uses: actions/checkout@v4
         with:
           ssh-key: ${{ secrets.DEPLOY_KEY }}
+          ref: main
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -176,10 +180,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase
           git add Casks/ packaging/ bucket/
           if ! git diff --staged --quiet; then
             git commit -m "chore(release): update cask and scoop manifests for ${{ github.event.inputs.tag || github.ref_name }} [skip ci]"
-            git fetch origin main
-            git rebase origin/main || true
-            git push origin HEAD:main
+            git push origin main
           fi

@@ -6,9 +6,11 @@ import os from "node:os";
 
 const rootDir = process.cwd();
 const pkgJson = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8"));
-const version = pkgJson.version || "1.1.0";
-
 const args = process.argv.slice(2);
+const versionArg = args.find((a) => a.startsWith("--version="))?.split("=")[1];
+const envVersion = process.env.RELEASE_VERSION ? process.env.RELEASE_VERSION.replace(/^v/, "").trim() : null;
+const version = versionArg || envVersion || pkgJson.version || "1.1.0";
+
 const skipBuild = args.includes("--skip-build");
 const manifestsOnly = args.includes("--manifests-only");
 const archArg = args.find((a) => a.startsWith("--arch="))?.split("=")[1];
@@ -160,13 +162,54 @@ if (manifestsOnly) {
   console.log(`📋 Generating Homebrew Cask manifests for GitShark v${version}...`);
   console.log(`========================================\n`);
 
-  const armDmg = path.join(distDir, `GitShark_${version}_aarch64.dmg`);
-  const intelDmg = path.join(distDir, `GitShark_${version}_x64.dmg`);
+  // Locate and normalize arm DMG
+  let armDmg = path.join(distDir, `GitShark_${version}_aarch64.dmg`);
+  if (!fs.existsSync(armDmg)) {
+    const found = fs.readdirSync(distDir).find((f) => f.endsWith(".dmg") && (f.includes("aarch64") || f.includes("arm64")));
+    if (found) {
+      const source = path.join(distDir, found);
+      const canonical = path.join(distDir, `GitShark_${version}_aarch64.dmg`);
+      if (source !== canonical) {
+        fs.renameSync(source, canonical);
+      }
+      armDmg = canonical;
+    }
+  }
+
+  // Locate and normalize intel DMG
+  let intelDmg = path.join(distDir, `GitShark_${version}_x64.dmg`);
+  if (!fs.existsSync(intelDmg)) {
+    const found = fs.readdirSync(distDir).find((f) => f.endsWith(".dmg") && (f.includes("x64") || f.includes("x86_64")));
+    if (found) {
+      const source = path.join(distDir, found);
+      const canonical = path.join(distDir, `GitShark_${version}_x64.dmg`);
+      if (source !== canonical) {
+        fs.renameSync(source, canonical);
+      }
+      intelDmg = canonical;
+    }
+  }
+
+  // Normalize zip filenames to canonical version if present
+  const armZipFound = fs.readdirSync(distDir).find((f) => f.endsWith(".zip") && (f.includes("aarch64") || f.includes("arm64")));
+  if (armZipFound) {
+    const canonicalArmZip = `GitShark_${version}_aarch64.zip`;
+    if (armZipFound !== canonicalArmZip) {
+      fs.renameSync(path.join(distDir, armZipFound), path.join(distDir, canonicalArmZip));
+    }
+  }
+  const intelZipFound = fs.readdirSync(distDir).find((f) => f.endsWith(".zip") && (f.includes("x64") || f.includes("x86_64")));
+  if (intelZipFound) {
+    const canonicalIntelZip = `GitShark_${version}_x64.zip`;
+    if (intelZipFound !== canonicalIntelZip) {
+      fs.renameSync(path.join(distDir, intelZipFound), path.join(distDir, canonicalIntelZip));
+    }
+  }
 
   let armHash = fs.existsSync(armDmg) ? computeFileSha256(armDmg) : null;
   let intelHash = fs.existsSync(intelDmg) ? computeFileSha256(intelDmg) : null;
 
-  // Try reading existing hashes from Casks/gitshark.rb if an architecture was not present in this build
+  // Try reading existing hashes from Casks/gitshark.rb if an architecture was not present in this local build
   const existingCaskPath = path.join(casksDir, "gitshark.rb");
   if (fs.existsSync(existingCaskPath)) {
     const existing = fs.readFileSync(existingCaskPath, "utf8");
@@ -180,11 +223,14 @@ if (manifestsOnly) {
     }
   }
 
-  // Fallbacks if one is not yet generated
-  if (!armHash && intelHash) armHash = intelHash;
-  if (!intelHash && armHash) intelHash = armHash;
-  if (!armHash) armHash = "0000000000000000000000000000000000000000000000000000000000000000";
-  if (!intelHash) intelHash = "0000000000000000000000000000000000000000000000000000000000000000";
+  if (!armHash || !intelHash) {
+    console.error(`❌ Release Error: Missing DMG files for Homebrew Cask generation!`);
+    console.error(`   Expected: GitShark_${version}_aarch64.dmg and GitShark_${version}_x64.dmg in ${distDir}`);
+    console.error(`   armHash:   ${armHash || "MISSING"}`);
+    console.error(`   intelHash: ${intelHash || "MISSING"}`);
+    console.error(`   Available files in dist-release:`, fs.readdirSync(distDir));
+    process.exit(1);
+  }
 
   const caskContent = renderCaskContent({ version, repoSlug, armHash, intelHash });
   fs.writeFileSync(path.join(casksDir, "gitshark.rb"), caskContent, "utf8");
@@ -198,22 +244,29 @@ if (manifestsOnly) {
     console.log(`✅ Scoop manifest synchronized from dist-release/gitshark.json`);
   }
 
-  // If a Windows zip was downloaded into dist-release, ensure scoop manifest hash matches
+  // If a Windows zip was downloaded into dist-release, ensure scoop manifest hash matches and filename matches
   const winZip = fs.readdirSync(distDir).find((f) => f.includes("windows") && f.endsWith(".zip"));
   if (winZip) {
-    const winZipHash = computeFileSha256(path.join(distDir, winZip));
+    const canonicalWinZip = `gitshark-v${version}-windows-x64-portable.zip`;
+    let activeWinZip = winZip;
+    if (winZip !== canonicalWinZip) {
+      fs.renameSync(path.join(distDir, winZip), path.join(distDir, canonicalWinZip));
+      activeWinZip = canonicalWinZip;
+    }
+    const winZipHash = computeFileSha256(path.join(distDir, activeWinZip));
     const scoopPath = path.join(rootDir, "packaging", "scoop", "gitshark.json");
     if (fs.existsSync(scoopPath)) {
       try {
         const scoopJson = JSON.parse(fs.readFileSync(scoopPath, "utf8"));
+        scoopJson.version = version;
         if (scoopJson.architecture?.["64bit"]) {
           scoopJson.architecture["64bit"].hash = winZipHash;
-          scoopJson.architecture["64bit"].url = `https://github.com/${repoSlug}/releases/download/v${version}/${winZip}`;
+          scoopJson.architecture["64bit"].url = `https://github.com/${repoSlug}/releases/download/v${version}/${activeWinZip}`;
           const updatedJson = JSON.stringify(scoopJson, null, 2) + "\n";
           fs.writeFileSync(scoopPath, updatedJson, "utf8");
           const bucketPath = path.join(rootDir, "bucket", "gitshark.json");
           fs.writeFileSync(bucketPath, updatedJson, "utf8");
-          console.log(`✅ Scoop manifest verified & updated for ${winZip}: ${winZipHash}`);
+          console.log(`✅ Scoop manifest verified & updated for ${activeWinZip}: ${winZipHash}`);
         }
       } catch (e) {
         console.warn(`   ⚠️ Warning updating scoop manifest: ${e.message}`);
@@ -233,6 +286,7 @@ if (manifestsOnly) {
   updateSha256SumsFile(newSums);
 
   console.log(`✅ Cask manifests generated with:`);
+  console.log(`   version:         v${version}`);
   console.log(`   arm64 (aarch64): ${armHash}`);
   console.log(`   intel (x64):     ${intelHash}`);
   process.exit(0);

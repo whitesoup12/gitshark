@@ -1,5 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { pickRepositoryDirectory, startCloneRepositoryIpc, cancelCloneIpc, listenToCloneProgress } from "@/lib/ipc";
 import { CloneProgressPayload } from "@/types";
 import {
@@ -15,6 +16,7 @@ import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 
 export const CloneWizardModal: React.FC = () => {
   const { cloneModalOpen, setCloneModalOpen, openRepositoryTab } = useWorkspaceStore();
+  const devDirectory = useSettingsStore((s) => s.devDirectory);
 
   const [url, setUrl] = useState("");
   const [destination, setDestination] = useState("");
@@ -22,7 +24,7 @@ export const CloneWizardModal: React.FC = () => {
   const [depth, setDepth] = useState<number>(1);
   const [isShallow, setIsShallow] = useState(false);
   const [recurseSubmodules, setRecurseSubmodules] = useState(false);
-
+  const [isDestinationManuallyEdited, setIsDestinationManuallyEdited] = useState(false);
 
   // Clone lifecycle
   const [isCloning, setIsCloning] = useState(false);
@@ -30,19 +32,48 @@ export const CloneWizardModal: React.FC = () => {
   const [rawLogs, setRawLogs] = useState<string[]>([]);
   const activeCloneIdRef = useRef<string | null>(null);
 
-  // Auto-suggest folder name from git URL
+  // Reset modal state whenever cloneModalOpen opens
+  useEffect(() => {
+    if (cloneModalOpen) {
+      setUrl("");
+      setBranch("");
+      setDepth(1);
+      setIsShallow(false);
+      setRecurseSubmodules(false);
+      setIsCloning(false);
+      setProgress(null);
+      setRawLogs([]);
+      setIsDestinationManuallyEdited(false);
+      const baseDir = devDirectory?.trim() || "";
+      setDestination(baseDir);
+    }
+  }, [cloneModalOpen, devDirectory]);
+
+  // Auto-suggest folder name from git URL when destination is defaulted to devDirectory
   const handleUrlChange = (value: string) => {
     setUrl(value);
-    const cleaned = value.trim().replace(/\/+$/, "");
-    const lastPart = cleaned.split(/[/:]/).pop()?.replace(/\.git$/, "");
-    if (lastPart && destination.endsWith("/")) {
-      setDestination(`${destination}${lastPart}`);
+    if (!isDestinationManuallyEdited) {
+      const baseDir = devDirectory?.trim() || "";
+      if (baseDir) {
+        const cleanedBase = baseDir.replace(/[/\\]+$/, "");
+        const sep = cleanedBase.includes("\\") ? "\\" : "/";
+        const cleaned = value.trim().replace(/\/+$/, "");
+        const repoName = cleaned.split(/[/:]/).pop()?.replace(/\.git$/, "");
+        if (repoName) {
+          setDestination(`${cleanedBase}${sep}${repoName}`);
+        } else {
+          setDestination(cleanedBase);
+        }
+      } else {
+        setDestination("");
+      }
     }
   };
 
   const handleBrowseDestination = async () => {
     const selected = await pickRepositoryDirectory();
     if (selected) {
+      setIsDestinationManuallyEdited(true);
       const cleaned = url.trim().replace(/\/+$/, "");
       const repoName = cleaned.split(/[/:]/).pop()?.replace(/\.git$/, "");
       if (repoName) {
@@ -129,6 +160,10 @@ export const CloneWizardModal: React.FC = () => {
     setCloneModalOpen(false);
     setProgress(null);
     setRawLogs([]);
+    setUrl("");
+    setBranch("");
+    setIsDestinationManuallyEdited(false);
+    setDestination(devDirectory?.trim() || "");
   };
 
   if (!cloneModalOpen) return null;
@@ -184,9 +219,12 @@ export const CloneWizardModal: React.FC = () => {
               <input
                 type="text"
                 value={destination}
-                onChange={(e) => setDestination(e.target.value)}
+                onChange={(e) => {
+                  setDestination(e.target.value);
+                  setIsDestinationManuallyEdited(true);
+                }}
                 disabled={isCloning}
-                placeholder="e.g. C:\Projects\repository"
+                placeholder={devDirectory?.trim() ? devDirectory.trim() : "e.g. C:\\Projects\\repository"}
                 className="flex-1 px-3 py-2 bg-shark-950 border border-shark-750 focus:border-sky-500 rounded-lg text-slate-100 placeholder-slate-500 font-mono text-xs outline-none transition-colors"
               />
               <button

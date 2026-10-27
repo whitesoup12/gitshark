@@ -5,7 +5,10 @@ import { execSync } from "node:child_process";
 
 const rootDir = process.cwd();
 const pkgJson = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8"));
-const version = pkgJson.version || "1.1.0";
+const args = process.argv.slice(2);
+const versionArg = args.find((a) => a.startsWith("--version="))?.split("=")[1];
+const envVersion = process.env.RELEASE_VERSION ? process.env.RELEASE_VERSION.replace(/^v/, "").trim() : null;
+const version = versionArg || envVersion || pkgJson.version || "1.1.0";
 
 console.log(`\n========================================`);
 console.log(`🚀 Packaging GitShark v${version} for Windows`);
