@@ -152,20 +152,6 @@ jobs:
           path: dist-release
           merge-multiple: true
 
-      - name: Check Working Tree Is Clean Before Rebase
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Repository is dirty before manifest generation. Commit or stash changes before releasing."
-            git status --short
-            exit 1
-          fi
-
-      - name: Sync with Main Before Manifest Generation
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
-
       - name: Generate Checksums & Homebrew Cask Manifests
         run: |
           find dist-release -mindepth 2 -type f -exec mv {} dist-release/ \; 2>/dev/null || true
@@ -194,6 +180,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase
           git add Casks/ packaging/ bucket/
           if ! git diff --staged --quiet; then
             git commit -m "chore(release): update cask and scoop manifests for ${{ github.event.inputs.tag || github.ref_name }} [skip ci]"
