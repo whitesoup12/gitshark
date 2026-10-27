@@ -62,6 +62,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     openInPrView,
     pruneWorktrees,
     openRepositoryTab,
+    removeWorktree,
+    fetchWorktrees,
   } = useWorkspaceStore();
 
   const openSettings = useSettingsStore((s) => s.openSettings);
@@ -220,15 +222,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   const [isDeletingBranch, setIsDeletingBranch] = useState(false);
 
   const promptDeleteBranch = (branchName: string, isRemote = false) => {
+    if (!tab.worktrees) {
+      fetchWorktrees(tab.id);
+    }
     setBranchToDelete({ branchName, isRemote });
   };
 
-  const confirmDeleteBranch = async () => {
+  const confirmDeleteBranch = async (options?: { removeWorktreePath?: string }) => {
     if (!branchToDelete || isDeletingBranch) return;
     setIsDeletingBranch(true);
     try {
-      await deleteBranch(tab.id, branchToDelete.branchName, branchToDelete.isRemote);
-      setBranchToDelete(null);
+      if (options?.removeWorktreePath) {
+        const removed = await removeWorktree(tab.id, options.removeWorktreePath, true);
+        if (!removed) return;
+      }
+      const success = await deleteBranch(tab.id, branchToDelete.branchName, branchToDelete.isRemote);
+      if (success) {
+        setBranchToDelete(null);
+      }
     } finally {
       setIsDeletingBranch(false);
     }
@@ -941,6 +952,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
           branchName={branchToDelete.branchName}
           isRemote={branchToDelete.isRemote}
           isDeleting={isDeletingBranch}
+          worktrees={tab.worktrees}
           onConfirm={confirmDeleteBranch}
           onCancel={() => {
             if (!isDeletingBranch) {

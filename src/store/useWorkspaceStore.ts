@@ -65,7 +65,7 @@ import { useSharkStore } from "@/store/useSharkStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { parseGitRemoteUrl } from "@/lib/remoteUrl";
 import { fetchRepoPullRequests } from "@/lib/pullRequests";
-import { showAlert } from "@/store/useDialogStore";
+import { showAlert, showConfirm } from "@/store/useDialogStore";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -1686,13 +1686,81 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
+    // 1. Close any open tab viewing this worktree directory to release file locks
+    const normalizedTarget = path.trim().replace(/\\/g, "/").toLowerCase();
+    const openWorktreeTab = get().tabs.find((t) => {
+      if (!t.path) return false;
+      const normalizedPath = t.path.trim().replace(/\\/g, "/").toLowerCase();
+      return normalizedPath === normalizedTarget;
+    });
+
+    if (openWorktreeTab) {
+      await get().closeTab(openWorktreeTab.id);
+    }
+
     try {
       await removeWorktreeIpc(tab.repoId, path, force);
-      await get().fetchWorktrees(tabId);
-      await get().refreshTabMetadata(tabId);
+      await Promise.all([
+        get().fetchWorktrees(tabId),
+        get().fetchBranches(tabId),
+        get().refreshTabMetadata(tabId),
+      ]);
       return true;
-    } catch (err) {
-      console.error("Failed to remove worktree:", err);
+    } catch (err: any) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn("Failed to remove worktree:", errMsg);
+
+      // If worktree contains modified/untracked files or is locked, offer force removal
+      const isDirtyOrLocked =
+        errMsg.includes("modified or untracked") ||
+        errMsg.includes("use --force") ||
+        errMsg.includes("is locked") ||
+        errMsg.includes("contains modified");
+
+      if (!force && isDirtyOrLocked) {
+        const forceConfirmed = await showConfirm({
+          title: "Force Remove Worktree?",
+          message: `The worktree at:\n"${path}"\ncontains modified or untracked files.\n\nWould you like to force remove it? All untracked changes in this directory will be permanently discarded.`,
+          confirmText: "Force Remove",
+          variant: "danger",
+        });
+
+        if (forceConfirmed) {
+          try {
+            await removeWorktreeIpc(tab.repoId, path, true);
+            await Promise.all([
+              get().fetchWorktrees(tabId),
+              get().fetchBranches(tabId),
+              get().refreshTabMetadata(tabId),
+            ]);
+            return true;
+          } catch (forceErr: any) {
+            const forceErrMsg = forceErr instanceof Error ? forceErr.message : String(forceErr);
+            console.error("Force remove worktree failed:", forceErrMsg);
+            showAlert({
+              title: "Remove Worktree Failed",
+              message: forceErrMsg,
+              variant: "error",
+            });
+            return false;
+          }
+        }
+        return false;
+      }
+
+      // If directory is missing on disk or not a working tree, attempt prune
+      if (errMsg.includes("is not a working tree") || errMsg.includes("worktree prune")) {
+        try {
+          await get().pruneWorktrees(tabId);
+          return true;
+        } catch (_) {}
+      }
+
+      showAlert({
+        title: "Remove Worktree Failed",
+        message: errMsg,
+        variant: "error",
+      });
       return false;
     }
   },
@@ -1788,14 +1856,62 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       useSharkStore
         .getState()
         .triggerCelebration("chomp", `Chomped branch '${branchName}'! 🦈`);
-      await get().refreshTabMetadata(tabId);
-      await get().fetchBranches(tabId);
+      await Promise.all([
+        get().refreshTabMetadata(tabId),
+        get().fetchBranches(tabId),
+        get().fetchWorktrees(tabId),
+      ]);
       return true;
-    } catch (err) {
-      console.error("Failed to delete branch:", err);
+    } catch (err: any) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("Failed to delete branch:", errMsg);
+
+      // Check if error is because it is checked out in a linked worktree
+      if (!isRemote && (errMsg.includes("checked out at") || errMsg.includes("worktree"))) {
+        const linkedWorktree = tab.worktrees?.find(
+          (w) => !w.is_main && (w.branch === branchName || w.branch === `refs/heads/${branchName}` || (w.branch && w.branch.endsWith(`/${branchName}`)))
+        );
+
+        if (linkedWorktree) {
+          const proceed = await showConfirm({
+            title: "Branch In Use By Worktree",
+            message: `Branch "${branchName}" cannot be deleted because it is checked out at linked worktree:\n"${linkedWorktree.path}"\n\nWould you like to remove this worktree and delete the branch?`,
+            confirmText: "Remove Worktree & Delete Branch",
+            variant: "danger",
+          });
+
+          if (proceed) {
+            const removed = await get().removeWorktree(tabId, linkedWorktree.path, true);
+            if (removed) {
+              try {
+                await deleteBranchIpc(tab.repoId, branchName, isRemote);
+                useSharkStore.getState().recordSharkStat("chomp", 1);
+                useSharkStore
+                  .getState()
+                  .triggerCelebration("chomp", `Chomped branch '${branchName}'! 🦈`);
+                await Promise.all([
+                  get().refreshTabMetadata(tabId),
+                  get().fetchBranches(tabId),
+                  get().fetchWorktrees(tabId),
+                ]);
+                return true;
+              } catch (retryErr: any) {
+                showAlert({
+                  title: "Delete Branch Failed",
+                  message: retryErr instanceof Error ? retryErr.message : String(retryErr),
+                  variant: "error",
+                });
+                return false;
+              }
+            }
+          }
+          return false;
+        }
+      }
+
       showAlert({
         title: "Delete Branch Failed",
-        message: err instanceof Error ? err.message : String(err),
+        message: errMsg,
         variant: "error",
       });
       return false;

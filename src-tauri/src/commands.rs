@@ -1146,11 +1146,13 @@ pub async fn remove_worktree(
         (session.path.clone(), resolve_git_command())
     };
 
+    let clean_path = path.trim().trim_end_matches(['/', '\\']).to_string();
+
     let mut args = vec!["worktree".to_string(), "remove".to_string()];
     if force {
         args.push("--force".to_string());
     }
-    args.push(path);
+    args.push(clean_path.clone());
 
     let output = create_silent_command(&git_cmd)
         .args(&args)
@@ -1160,6 +1162,18 @@ pub async fn remove_worktree(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        // If the directory does not exist on disk, or git notes it is not a working tree, try git worktree prune
+        if !std::path::Path::new(&clean_path).exists() || stderr.contains("is not a working tree") {
+            let prune_output = create_silent_command(&git_cmd)
+                .args(["worktree", "prune"])
+                .current_dir(&workdir)
+                .output();
+            if let Ok(po) = prune_output {
+                if po.status.success() {
+                    return Ok(());
+                }
+            }
+        }
         return Err(format!("git worktree remove failed: {stderr}"));
     }
 
@@ -1728,6 +1742,37 @@ pub async fn delete_branch(
     branch_name: String,
     is_remote: bool,
 ) -> Result<(), String> {
+    let (workdir, git_cmd) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+        (session.path.clone(), resolve_git_command())
+    };
+
+    {
+        let registry = state.read();
+        if let Some(session) = registry.get(&repo_id) {
+            let repo = session.repo.lock();
+            let res = git::delete_branch(&repo, &branch_name, is_remote);
+            if res.is_ok() {
+                return Ok(());
+            }
+            if let Err(ref e) = res {
+                if !e.contains("checked out at") {
+                    return res;
+                }
+            }
+        }
+    }
+
+    // Branch may be reported as checked out in an orphaned worktree whose directory is gone.
+    // Try pruning worktrees and re-attempting deletion.
+    let _ = create_silent_command(&git_cmd)
+        .args(["worktree", "prune"])
+        .current_dir(&workdir)
+        .output();
+
     let registry = state.read();
     let session = registry
         .get(&repo_id)
