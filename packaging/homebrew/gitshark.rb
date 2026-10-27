@@ -1,7 +1,7 @@
 cask "gitshark" do
   arch arm: "aarch64", intel: "x64"
 
-  version "1.9.0"
+  version "1.9.1"
   sha256 arm:   "e1832502ddbf666e2bdb8fafa9c5838e3d1f458b10fa7c954fd74728b6246bae",
          intel: "8470542b60de968d777d74ec69db77662fca9cfb2e7a4b68e212d04284deb531"
 
