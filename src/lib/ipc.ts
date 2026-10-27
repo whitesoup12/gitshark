@@ -642,18 +642,22 @@ export async function executeGitPushIpc(
   remote?: string,
   branch?: string,
   force: boolean = false,
-  setUpstream: boolean = false
+  setUpstream: boolean = false,
+  tags: boolean = false,
+  followTags: boolean = false
 ): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force}, setUpstream=${setUpstream})`);
+    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force}, setUpstream=${setUpstream}, tags=${tags}, followTags=${followTags})`);
     return;
   }
   return await invoke<void>("execute_git_push", {
     repoId,
-    remote,
-    branch,
-    force,
-    setUpstream,
+    remote: remote || null,
+    branch: branch || null,
+    force: force || null,
+    setUpstream: setUpstream || null,
+    tags: tags || null,
+    followTags: followTags || null,
   });
 }
 
@@ -1395,6 +1399,20 @@ export async function pushTagIpc(
     return;
   }
   return await invoke<void>("push_tag", { repoId, tagName, remote });
+}
+
+/**
+ * Push all tags to remote origin via PTY streaming (git push --tags)
+ */
+export async function pushAllTagsIpc(
+  repoId: string,
+  remote?: string
+): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.log(`[Browser Sim] push_all_tags to ${remote || "origin"}`);
+    return;
+  }
+  return await invoke<void>("push_all_tags", { repoId, remote: remote || null });
 }
 
 /**

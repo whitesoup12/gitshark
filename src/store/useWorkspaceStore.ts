@@ -52,6 +52,7 @@ import {
   createTagIpc,
   deleteTagIpc,
   pushTagIpc,
+  pushAllTagsIpc,
   listenToTerminalExit,
   listenToTerminalData,
   getRepositoryRemoteUrlIpc,
@@ -61,6 +62,7 @@ import {
 } from "@/lib/ipc";
 import { GitTagItem, PullRequestInfo } from "@/types";
 import { useSharkStore } from "@/store/useSharkStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { parseGitRemoteUrl } from "@/lib/remoteUrl";
 import { fetchRepoPullRequests } from "@/lib/pullRequests";
 import { showAlert } from "@/store/useDialogStore";
@@ -92,7 +94,9 @@ interface WorkspaceState {
     remote?: string,
     branch?: string,
     force?: boolean,
-    setUpstream?: boolean
+    setUpstream?: boolean,
+    tags?: boolean,
+    followTags?: boolean
   ) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
@@ -143,6 +147,7 @@ interface WorkspaceState {
   ) => Promise<boolean>;
   deleteTag: (tabId: string, tagName: string) => Promise<boolean>;
   pushTag: (tabId: string, tagName: string, remote?: string) => Promise<boolean>;
+  pushAllTags: (tabId: string, remote?: string) => Promise<boolean>;
 
   // Browser Navigation & Pull Requests
   openRepoInBrowser: (tabId: string) => Promise<boolean>;
@@ -645,7 +650,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     remote?: string,
     branch?: string,
     force: boolean = false,
-    setUpstream: boolean = false
+    setUpstream: boolean = false,
+    tags?: boolean,
+    followTags?: boolean
   ): Promise<boolean> => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
@@ -748,7 +755,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }
         });
 
-        await executeGitPushIpc(repoId, remote, branch, force, setUpstream);
+        const pushTagsPref = useSettingsStore.getState().pushTagsOption;
+        const effectiveTags = tags ?? (pushTagsPref === "all");
+        const effectiveFollowTags = followTags ?? (pushTagsPref === "follow-tags");
+        await executeGitPushIpc(repoId, remote, branch, force, setUpstream, effectiveTags, effectiveFollowTags);
       } catch (err) {
         if (isDone) return;
         isDone = true;
@@ -2099,6 +2109,93 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           terminalOpen: true,
           hookState: {
             stage: "committing",
+            status: "failed",
+            elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
+            lastCommand: "push",
+            exitCode: 1,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        resolve(false);
+      }
+    });
+  },
+
+  pushAllTags: async (tabId: string, remote = "origin") => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || !tab.repoId) return false;
+
+    const repoId = tab.repoId;
+    get().updateTab(tabId, {
+      terminalOpen: true,
+      hookState: {
+        stage: "pushing",
+        status: "running",
+        elapsedSeconds: 0,
+        lastCommand: "push",
+        exitCode: null,
+        error: null,
+      },
+    });
+
+    const startTime = Date.now();
+    return new Promise<boolean>(async (resolve) => {
+      let isDone = false;
+      let unlistenExitFn: (() => void) | null = null;
+
+      const cleanup = () => {
+        if (unlistenExitFn) {
+          unlistenExitFn();
+          unlistenExitFn = null;
+        }
+      };
+
+      try {
+        unlistenExitFn = await listenToTerminalExit(repoId, async (payload) => {
+          if (isDone) return;
+          isDone = true;
+          cleanup();
+
+          const totalElapsed = (Date.now() - startTime) / 1000;
+          if (payload.success) {
+            get().updateTab(tabId, {
+              hookState: {
+                stage: "pushing",
+                status: "passed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "push",
+                exitCode: 0,
+              },
+            });
+            await get().fetchTags(tabId);
+            useSharkStore.getState().recordSharkStat("push", 1);
+            useSharkStore.getState().triggerCelebration("swim", "Pushed All Tags to Remote! 🏷️🌊");
+            resolve(true);
+          } else {
+            get().updateTab(tabId, {
+              terminalOpen: true,
+              hookState: {
+                stage: "pushing",
+                status: "failed",
+                elapsedSeconds: Number(totalElapsed.toFixed(1)),
+                lastCommand: "push",
+                exitCode: payload.exit_code ?? 1,
+                error: `Push tags failed with exit code ${payload.exit_code ?? 1}`,
+              },
+            });
+            resolve(false);
+          }
+        });
+
+        await pushAllTagsIpc(repoId, remote);
+      } catch (err) {
+        if (isDone) return;
+        isDone = true;
+        cleanup();
+        get().updateTab(tabId, {
+          terminalOpen: true,
+          hookState: {
+            stage: "pushing",
             status: "failed",
             elapsedSeconds: Number(((Date.now() - startTime) / 1000).toFixed(1)),
             lastCommand: "push",

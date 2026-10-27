@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GitBinaryInfo, SettingsTab } from "@/types";
+import type { GitBinaryInfo, SettingsTab, PushTagsOption } from "@/types";
 import {
   getGitBinaryInfoIpc,
   setCustomGitPathIpc,
@@ -12,6 +12,7 @@ import {
 const STORAGE_CUSTOM_GIT_PATH = "gitshark_custom_git_path";
 const STORAGE_DIFF_REFRESH_DELAY = "gitshark_diff_refresh_delay";
 const STORAGE_DEV_DIRECTORY = "gitshark_dev_directory";
+const STORAGE_PUSH_TAGS_OPTION = "gitshark_push_tags_option";
 
 interface SettingsState {
   isSettingsOpen: boolean;
@@ -24,6 +25,7 @@ interface SettingsState {
   saveMessage: { success: boolean; message: string } | null;
   diffRefreshDelayMs: number;
   devDirectory: string | null;
+  pushTagsOption: PushTagsOption;
 
   // Actions
   openSettings: (tab?: SettingsTab) => void;
@@ -32,6 +34,7 @@ interface SettingsState {
   setCustomPathInput: (input: string) => void;
   setDiffRefreshDelayMs: (delayMs: number) => Promise<void>;
   setDevDirectory: (path: string | null) => void;
+  setPushTagsOption: (option: PushTagsOption) => void;
   browseForDevDirectory: () => Promise<string | null>;
   loadGitInfo: () => Promise<void>;
   browseForGitExecutable: () => Promise<void>;
@@ -52,6 +55,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveMessage: null,
   diffRefreshDelayMs: 1500,
   devDirectory: null,
+  pushTagsOption: "follow-tags",
 
   setDevDirectory: (path: string | null) => {
     const trimmed = path?.trim() || null;
@@ -61,6 +65,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       localStorage.removeItem(STORAGE_DEV_DIRECTORY);
     }
     set({ devDirectory: trimmed });
+  },
+
+  setPushTagsOption: (option: PushTagsOption) => {
+    localStorage.setItem(STORAGE_PUSH_TAGS_OPTION, option);
+    set({ pushTagsOption: option });
   },
 
   browseForDevDirectory: async () => {
@@ -215,6 +224,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const savedDevDir = localStorage.getItem(STORAGE_DEV_DIRECTORY);
       if (savedDevDir && savedDevDir.trim().length > 0) {
         set({ devDirectory: savedDevDir.trim() });
+      }
+
+      const savedPushTags = localStorage.getItem(STORAGE_PUSH_TAGS_OPTION) as PushTagsOption | null;
+      if (savedPushTags && ["none", "follow-tags", "all"].includes(savedPushTags)) {
+        set({ pushTagsOption: savedPushTags });
       }
 
       await get().loadGitInfo();

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   X,
+  Bookmark,
   Settings,
   Terminal,
   Palette,
@@ -47,6 +48,8 @@ export const SettingsModal: React.FC = () => {
     devDirectory,
     setDevDirectory,
     browseForDevDirectory,
+    pushTagsOption,
+    setPushTagsOption,
   } = useSettingsStore();
 
   const {
@@ -403,6 +406,89 @@ export const SettingsModal: React.FC = () => {
                         Clear
                       </button>
                     )}
+                  </div>
+                </div>
+
+                {/* Push Tags Configuration */}
+                <div className="space-y-3 pt-4 border-t border-shark-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-200">
+                        Push Tags Behavior
+                      </label>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Automatically push Git tags when pushing commits or syncing your branch.
+                      </p>
+                    </div>
+                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800/40 font-semibold">
+                      {pushTagsOption === "follow-tags" ? "--follow-tags" : pushTagsOption === "all" ? "--tags" : "disabled"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5 pt-1">
+                    {[
+                      {
+                        value: "follow-tags" as const,
+                        label: "Follow Tags",
+                        badge: "Recommended",
+                        desc: "Pushes reachable annotated tags attached to commits (e.g. release tags)",
+                        cmd: "git push --follow-tags",
+                      },
+                      {
+                        value: "all" as const,
+                        label: "Push All Tags",
+                        badge: "Complete",
+                        desc: "Pushes all local tags in your repository to remote origin",
+                        cmd: "git push --tags",
+                      },
+                      {
+                        value: "none" as const,
+                        label: "Do Not Push Tags",
+                        badge: "Default",
+                        desc: "Only push commits; tags must be manually pushed individually",
+                        cmd: "git push",
+                      },
+                    ].map((option) => {
+                      const isSelected = pushTagsOption === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setPushTagsOption(option.value)}
+                          className={`flex flex-col items-start p-3 rounded-lg border text-left transition-all relative ${
+                            isSelected
+                              ? "bg-sky-600/15 border-sky-500/60 text-sky-200 ring-1 ring-sky-500/30"
+                              : "bg-shark-950 border-shark-800 text-slate-400 hover:text-slate-200 hover:border-shark-700"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full mb-1">
+                            <span className="text-xs font-bold text-slate-100">{option.label}</span>
+                            <span
+                              className={`text-[9px] px-1.5 py-0.2 rounded font-medium ${
+                                isSelected
+                                  ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                                  : "bg-shark-800 text-slate-400 border border-shark-700"
+                              }`}
+                            >
+                              {option.badge}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-snug mb-2">
+                            {option.desc}
+                          </p>
+                          <span className="mt-auto text-[10px] font-mono text-slate-500 bg-shark-900/90 px-1.5 py-0.5 rounded border border-shark-800">
+                            {option.cmd}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="p-2.5 rounded-lg bg-shark-950/60 border border-shark-800/70 text-[11px] text-slate-400 flex items-start gap-2">
+                    <Bookmark className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <span>
+                      <strong className="text-slate-300">GitHub Actions & Release Tip:</strong> When using <code className="text-sky-300 font-mono">--follow-tags</code> or <code className="text-sky-300 font-mono">--tags</code>, syncing or pushing your branch in GitShark will automatically push newly created release tags, immediately triggering your GitHub Actions release workflow without needing a separate manual push.
+                    </span>
                   </div>
                 </div>
               </div>

@@ -818,6 +818,8 @@ pub async fn execute_git_push(
     branch: Option<String>,
     force: Option<bool>,
     set_upstream: Option<bool>,
+    tags: Option<bool>,
+    follow_tags: Option<bool>,
 ) -> Result<(), String> {
     let (
         pty_manager,
@@ -902,6 +904,12 @@ pub async fn execute_git_push(
     let mut args = vec!["push".to_string()];
     if force.unwrap_or(false) {
         args.push("--force-with-lease".to_string());
+    }
+
+    if tags.unwrap_or(false) {
+        args.push("--tags".to_string());
+    } else if follow_tags.unwrap_or(false) {
+        args.push("--follow-tags".to_string());
     }
 
     let should_set_upstream = set_upstream.unwrap_or(auto_upstream);
@@ -2013,6 +2021,36 @@ pub async fn push_tag(
     let remote_target = remote.unwrap_or_else(|| "origin".to_string());
     let clean_tag = tag_name.trim().trim_start_matches("refs/tags/");
     let args = vec!["push".to_string(), remote_target, format!("refs/tags/{clean_tag}")];
+
+    pty_manager.spawn(
+        repo_id,
+        workdir,
+        git_cmd,
+        args,
+        100,
+        30,
+        app_handle,
+    )
+}
+
+#[tauri::command]
+pub async fn push_all_tags(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    remote: Option<String>,
+) -> Result<(), String> {
+    let (pty_manager, workdir) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Session not found: {repo_id}"))?;
+        (session.pty_manager.clone(), session.path.clone())
+    };
+
+    let git_cmd = resolve_git_command();
+    let remote_target = remote.unwrap_or_else(|| "origin".to_string());
+    let args = vec!["push".to_string(), remote_target, "--tags".to_string()];
 
     pty_manager.spawn(
         repo_id,

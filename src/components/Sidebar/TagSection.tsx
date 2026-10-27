@@ -30,6 +30,7 @@ export const TagSection: React.FC<TagSectionProps> = ({
     createTag,
     deleteTag,
     pushTag,
+    pushAllTags,
     setActiveView,
     updateTab,
   } = useWorkspaceStore();
@@ -41,6 +42,7 @@ export const TagSection: React.FC<TagSectionProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activePushingTag, setActivePushingTag] = useState<string | null>(null);
+  const [isPushingAll, setIsPushingAll] = useState(false);
 
   useEffect(() => {
     if (tab.repoId && !tab.tags) {
@@ -58,6 +60,25 @@ export const TagSection: React.FC<TagSectionProps> = ({
       await fetchTags(tab.id);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handlePushAllTags = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!tab.repoId || isPushingAll || tags.length === 0) return;
+    const confirmed = await showConfirm({
+      title: "Push All Tags to Remote",
+      message: `Do you want to push all ${tags.length} local tag(s) to remote (git push --tags)?`,
+      confirmText: "Push Tags",
+      variant: "info",
+    });
+    if (confirmed) {
+      setIsPushingAll(true);
+      try {
+        await pushAllTags(tab.id);
+      } finally {
+        setIsPushingAll(false);
+      }
     }
   };
 
@@ -143,6 +164,19 @@ export const TagSection: React.FC<TagSectionProps> = ({
               className={`w-3 h-3 ${isRefreshing ? "animate-spin text-amber-400" : ""}`}
             />
           </button>
+
+          {tags.length > 0 && (
+            <button
+              onClick={handlePushAllTags}
+              disabled={isPushingAll}
+              className="p-0.5 rounded text-slate-400 hover:text-sky-300 hover:bg-shark-750 transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+              title="Push all tags to remote (git push --tags)"
+            >
+              <UploadCloud
+                className={`w-3 h-3 ${isPushingAll ? "animate-bounce text-sky-400" : ""}`}
+              />
+            </button>
+          )}
 
           <button
             onClick={(e) => {
