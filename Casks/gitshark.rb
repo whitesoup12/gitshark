@@ -1,41 +1,50 @@
-cask "gitshark" do
-  arch arm: "aarch64", intel: "x64"
-
-  version "1.8.0"
-  sha256 arm:   "e1832502ddbf666e2bdb8fafa9c5838e3d1f458b10fa7c954fd74728b6246bae",
-         intel: "8470542b60de968d777d74ec69db77662fca9cfb2e7a4b68e212d04284deb531"
-
-  url "https://github.com/whitesoup12/gitshark/releases/download/v#{version}/GitShark_#{version}_#{arch}.dmg"
-  name "GitShark"
-  desc "Blazingly fast, modern Git desktop client built with Tauri v2 and Rust"
-  homepage "https://github.com/whitesoup12/gitshark"
-
-  livecheck do
-    url :url
-    strategy :github_latest
-  end
-
-  auto_updates true
-
-  app "GitShark.app"
-  binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
-
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-cr", "#{appdir}/GitShark.app"],
-                   sudo: false
-  end
-
-  zap trash: [
-    "~/Library/Application Support/com.gitshark.app",
-    "~/Library/Caches/com.gitshark.app",
-    "~/Library/Preferences/com.gitshark.app.plist",
-    "~/Library/Saved Application State/com.gitshark.app.savedState",
-    "~/Library/WebKit/com.gitshark.app",
-  ]
-
-  caveats <<~EOS
-    If you encounter a macOS Gatekeeper warning when opening GitShark, you can remove the quarantine attribute by running:
-      xattr -cr /Applications/GitShark.app
-  EOS
-end
+{
+  "name": "gitshark",
+  "private": true,
+  "version": "1.8.1",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/run-tauri.mjs dev",
+    "desktop": "node scripts/run-tauri.mjs dev",
+    "dev:ui": "vite",
+    "dev:web": "vite",
+    "build": "tsc && vite build",
+    "build:desktop": "node scripts/run-tauri.mjs build",
+    "preview": "vite preview",
+    "tauri": "node scripts/run-tauri.mjs",
+    "package": "node scripts/package.mjs",
+    "package:mac": "node scripts/package-mac.mjs",
+    "package:brew": "node scripts/package-mac.mjs",
+    "package:win": "node scripts/package-win.mjs",
+    "package:portable": "node scripts/package-win.mjs",
+    "package:scoop": "node scripts/package-win.mjs",
+    "bump": "node scripts/bump-version.mjs",
+    "check:version": "node scripts/verify-version.mjs",
+    "setup:hooks": "node scripts/install-hooks.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.475.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.0.1",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}

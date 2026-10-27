@@ -1,1 +1,193 @@
-export const APP_VERSION = "1.8.0";
+name: Release GitShark Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Git Tag (e.g. v1.1.0)'
+        required: true
+        default: 'v1.1.0'
+      draft:
+        description: 'Create as Draft Release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build-windows:
+    name: Build & Package Windows (x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Run Test Suite
+        run: |
+          npm run build
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build & Package Windows Executables
+        run: node scripts/package-win.mjs
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: |
+            dist-release/*.zip
+            dist-release/*.exe
+            dist-release/gitshark.json
+
+  build-macos:
+    name: Build & Package macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - arch: x64
+            os: macos-14
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Install Rosetta 2
+        if: matrix.arch == 'x64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Run Test Suite
+        run: |
+          npm run build
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build & Package macOS Bundles
+        run: node scripts/package-mac.mjs --target=${{ matrix.target }} --arch=${{ matrix.arch }}
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-${{ matrix.arch }}
+          path: |
+            dist-release/*.dmg
+            dist-release/*.zip
+
+  publish-release:
+    name: Publish Unified GitHub Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code (Main Branch for Manifest Updates)
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Sync with Main Before Manifest Generation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
+      - name: Generate Checksums & Homebrew Cask Manifests
+        run: |
+          find dist-release -mindepth 2 -type f -exec mv {} dist-release/ \; 2>/dev/null || true
+          node scripts/package-mac.mjs --manifests-only
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: GitShark ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            dist-release/*.zip
+            dist-release/*.exe
+            dist-release/*.dmg
+            dist-release/SHA256SUMS.txt
+            packaging/scoop/gitshark.json
+            packaging/homebrew/gitshark.rb
+            Casks/gitshark.rb
+          generate_release_notes: true
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit & Push Updated Manifests to Main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/ packaging/ bucket/
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(release): update cask and scoop manifests for ${{ github.event.inputs.tag || github.ref_name }} [skip ci]"
+            git push origin main
+          fi
