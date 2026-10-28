@@ -1,7 +1,7 @@
 {
   "name": "gitshark",
   "private": true,
-  "version": "1.9.1",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/run-tauri.mjs dev",
@@ -24,6 +24,7 @@
     "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@xterm/addon-fit": "^0.10.0",

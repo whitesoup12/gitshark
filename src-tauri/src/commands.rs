@@ -4,7 +4,7 @@ use crate::watcher::RepoWatcher;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 
@@ -1165,7 +1165,7 @@ pub async fn remove_worktree(
         // If the directory does not exist on disk, or git notes it is not a working tree, try git worktree prune
         if !std::path::Path::new(&clean_path).exists() || stderr.contains("is not a working tree") {
             let prune_output = create_silent_command(&git_cmd)
-                .args(["worktree", "prune"])
+                .args(["worktree", "prune", "--expire", "now"])
                 .current_dir(&workdir)
                 .output();
             if let Ok(po) = prune_output {
@@ -1176,6 +1176,17 @@ pub async fn remove_worktree(
         }
         return Err(format!("git worktree remove failed: {stderr}"));
     }
+
+    // Ensure the folder on disk is completely removed (Windows file handles can sometimes leave empty folders)
+    if std::path::Path::new(&clean_path).exists() {
+        let _ = std::fs::remove_dir_all(&clean_path);
+    }
+
+    // Always prune after remove so git administrative files drop the worktree reference immediately
+    let _ = create_silent_command(&git_cmd)
+        .args(["worktree", "prune", "--expire", "now"])
+        .current_dir(&workdir)
+        .output();
 
     Ok(())
 }
@@ -1750,35 +1761,88 @@ pub async fn delete_branch(
         (session.path.clone(), resolve_git_command())
     };
 
-    {
-        let registry = state.read();
-        if let Some(session) = registry.get(&repo_id) {
-            let repo = session.repo.lock();
-            let res = git::delete_branch(&repo, &branch_name, is_remote);
-            if res.is_ok() {
-                return Ok(());
+    let clean_branch = branch_name
+        .trim()
+        .trim_start_matches("refs/heads/")
+        .trim_start_matches("refs/remotes/")
+        .to_string();
+
+    // 1. Check if trying to delete the currently active branch of the main repository
+    if !is_remote {
+        let is_active_branch = {
+            let registry = state.read();
+            if let Some(session) = registry.get(&repo_id) {
+                let repo = session.repo.lock();
+                repo.head()
+                    .ok()
+                    .and_then(|h| h.shorthand().map(|s| s == clean_branch))
+                    .unwrap_or(false)
+            } else {
+                false
             }
-            if let Err(ref e) = res {
-                if !e.contains("checked out at") {
-                    return res;
-                }
-            }
+        };
+
+        if is_active_branch {
+            return Err(format!(
+                "Cannot delete currently active branch '{clean_branch}'. Please switch to another branch first."
+            ));
         }
     }
 
-    // Branch may be reported as checked out in an orphaned worktree whose directory is gone.
-    // Try pruning worktrees and re-attempting deletion.
+    // 2. Try libgit2 deletion first
+    let libgit2_res = {
+        let registry = state.read();
+        if let Some(session) = registry.get(&repo_id) {
+            let repo = session.repo.lock();
+            git::delete_branch(&repo, &clean_branch, is_remote)
+        } else {
+            Err("Session not found".to_string())
+        }
+    };
+
+    if libgit2_res.is_ok() {
+        return Ok(());
+    }
+
+    let libgit2_err = libgit2_res.unwrap_err();
+
+    // For remote branch deletion, libgit2 handles references; if it failed, return error
+    if is_remote {
+        return Err(libgit2_err);
+    }
+
+    // 3. Fallback for local branches:
+    // Worktree metadata in .git/worktrees/ may be stale or held by cached handles.
+    // Prune stale worktrees with `--expire now`
     let _ = create_silent_command(&git_cmd)
-        .args(["worktree", "prune"])
+        .args(["worktree", "prune", "--expire", "now"])
         .current_dir(&workdir)
         .output();
 
-    let registry = state.read();
-    let session = registry
-        .get(&repo_id)
-        .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
-    let repo = session.repo.lock();
-    git::delete_branch(&repo, &branch_name, is_remote)
+    // Run native Git CLI `git branch -D <clean_branch>`
+    let cli_output = create_silent_command(&git_cmd)
+        .args(["branch", "-D", &clean_branch])
+        .current_dir(&workdir)
+        .output()
+        .map_err(|e| format!("Failed to execute git branch -D: {e}"))?;
+
+    if cli_output.status.success() {
+        log::info!("Deleted branch '{}' via git CLI fallback", clean_branch);
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&cli_output.stderr);
+    let trimmed_stderr = stderr.trim();
+
+    if trimmed_stderr.contains("checked out at") {
+        return Err(format!("Cannot delete branch '{clean_branch}': {trimmed_stderr}"));
+    }
+
+    if !trimmed_stderr.is_empty() {
+        Err(format!("Cannot delete branch '{clean_branch}': {trimmed_stderr}"))
+    } else {
+        Err(libgit2_err)
+    }
 }
 
 #[tauri::command]
@@ -2467,6 +2531,282 @@ pub fn list_dev_folders(dir_path: String) -> Result<Vec<DevFolderItem>, String> 
     Ok(folders)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeSharkDirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeSharkPathInfo {
+    pub path: String,
+    pub name: String,
+    pub is_dir: bool,
+    pub exists: bool,
+}
+
+fn simple_percent_encode(s: &str) -> String {
+    let mut encoded = String::new();
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            _ => {
+                encoded.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    encoded
+}
+
+#[tauri::command]
+pub fn get_path_info(target_path: String) -> Result<CodeSharkPathInfo, String> {
+    let p = std::path::Path::new(&target_path);
+    if !p.exists() {
+        return Ok(CodeSharkPathInfo {
+            path: target_path.clone(),
+            name: p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(target_path),
+            is_dir: false,
+            exists: false,
+        });
+    }
+
+    let canonical = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let normalized = canonical.to_string_lossy().to_string().replace(r"\\?\", "");
+    let name = canonical.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| normalized.clone());
+
+    Ok(CodeSharkPathInfo {
+        path: normalized,
+        name,
+        is_dir: canonical.is_dir(),
+        exists: true,
+    })
+}
+
+#[tauri::command]
+pub async fn launch_or_focus_codeshark(
+    app_handle: AppHandle,
+    target_path: Option<String>,
+) -> Result<(), String> {
+    let normalized_path = target_path.map(|p| {
+        let path = std::path::Path::new(&p);
+        if let Ok(canon) = std::fs::canonicalize(path) {
+            canon.to_string_lossy().to_string().replace(r"\\?\", "")
+        } else {
+            p
+        }
+    });
+
+    if let Some(window) = app_handle.get_webview_window("codeshark") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+
+        if let Some(ref path) = normalized_path {
+            let _ = window.emit("codeshark:open-target", serde_json::json!({ "path": path }));
+        }
+    } else {
+        let mut url_str = "index.html?app=codeshark".to_string();
+        if let Some(ref path) = normalized_path {
+            let encoded = simple_percent_encode(path);
+            url_str = format!("index.html?app=codeshark&initPath={}", encoded);
+        }
+
+        let builder = tauri::WebviewWindowBuilder::new(
+            &app_handle,
+            "codeshark",
+            tauri::WebviewUrl::App(url_str.into()),
+        )
+        .title("CodeShark")
+        .inner_size(1400.0, 900.0)
+        .min_inner_size(800.0, 500.0)
+        .center()
+        .decorations(true)
+        .focused(true);
+
+        builder.build().map_err(|e| format!("Failed to create CodeShark window: {e}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_dir_entries(dir_path: String) -> Result<Vec<CodeSharkDirEntry>, String> {
+    let p = std::path::Path::new(&dir_path);
+    if !p.exists() || !p.is_dir() {
+        return Err(format!("Path '{}' is not a valid directory", dir_path));
+    }
+
+    let entries = std::fs::read_dir(p)
+        .map_err(|e| format!("Failed to read directory '{}': {e}", dir_path))?;
+
+    let mut result = Vec::new();
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if file_name == ".git" {
+            continue;
+        }
+
+        let file_type = entry.file_type();
+        let is_dir = file_type.as_ref().map(|t| t.is_dir()).unwrap_or(false);
+        let path_buf = entry.path();
+        let normalized = path_buf.to_string_lossy().to_string().replace(r"\\?\", "");
+
+        let size = if !is_dir {
+            entry.metadata().ok().map(|m| m.len())
+        } else {
+            None
+        };
+
+        result.push(CodeSharkDirEntry {
+            name: file_name,
+            path: normalized,
+            is_dir,
+            size,
+        });
+    }
+
+    result.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn read_text_file(file_path: String) -> Result<String, String> {
+    let p = std::path::Path::new(&file_path);
+    if !p.exists() || !p.is_file() {
+        return Err(format!("File '{}' does not exist or is not a file", file_path));
+    }
+
+    if let Ok(meta) = p.metadata() {
+        if meta.len() > 10 * 1024 * 1024 {
+            return Err("File exceeds 10MB limit for in-memory editor".to_string());
+        }
+    }
+
+    std::fs::read_to_string(p)
+        .map_err(|e| format!("Failed to read file '{}': {e}", file_path))
+}
+
+#[tauri::command]
+pub fn write_text_file(file_path: String, content: String) -> Result<(), String> {
+    let p = std::path::Path::new(&file_path);
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    std::fs::write(p, content.as_bytes())
+        .map_err(|e| format!("Failed to write file '{}': {e}", file_path))
+}
+
+#[tauri::command]
+pub async fn get_repo_git_status(dir_path: String) -> Result<HashMap<String, String>, String> {
+    let p = std::path::Path::new(&dir_path);
+    if !p.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let repo = match git2::Repository::discover(p) {
+        Ok(r) => r,
+        Err(_) => return Ok(HashMap::new()),
+    };
+
+    let status = git::get_working_tree_status(&repo)?;
+    let mut map = HashMap::new();
+
+    for item in status.untracked {
+        map.insert(item.path.replace('\\', "/"), "untracked".to_string());
+    }
+    for item in status.unstaged {
+        map.insert(item.path.replace('\\', "/"), item.status);
+    }
+    for item in status.staged {
+        map.entry(item.path.replace('\\', "/")).or_insert_with(|| "staged".to_string());
+    }
+    for item in status.conflicted {
+        map.insert(item.path.replace('\\', "/"), "conflicted".to_string());
+    }
+
+    Ok(map)
+}
+
+#[tauri::command]
+pub async fn get_file_git_head_content(
+    dir_path: String,
+    file_path: String,
+) -> Result<Option<String>, String> {
+    let p = std::path::Path::new(&dir_path);
+    if !p.exists() {
+        return Ok(None);
+    }
+
+    let repo = match git2::Repository::discover(p) {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+
+    let workdir = repo.workdir().unwrap_or(p);
+    let full_file = std::path::Path::new(&file_path);
+    let canon_workdir = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    let canon_file = std::fs::canonicalize(full_file).unwrap_or_else(|_| full_file.to_path_buf());
+
+    let rel_path = match canon_file.strip_prefix(&canon_workdir) {
+        Ok(rel) => rel.to_path_buf(),
+        Err(_) => match full_file.strip_prefix(workdir) {
+            Ok(rel) => rel.to_path_buf(),
+            Err(_) => return Ok(None),
+        },
+    };
+
+    let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+    let head = match repo.head() {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    let commit = match head.peel_to_commit() {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
+
+    let entry = match tree.get_path(std::path::Path::new(&rel_str)) {
+        Ok(e) => e,
+        Err(_) => return Ok(None),
+    };
+
+    let object = match entry.to_object(&repo) {
+        Ok(o) => o,
+        Err(_) => return Ok(None),
+    };
+
+    let blob = match object.as_blob() {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+
+    match std::str::from_utf8(blob.content()) {
+        Ok(s) => Ok(Some(s.to_string())),
+        Err(_) => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2551,6 +2891,77 @@ mod tests {
         let loaded: OpenReposSession = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.open_paths.len(), 1);
         assert_eq!(loaded.active_path, session.active_path);
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_codeshark_simple_percent_encode() {
+        assert_eq!(simple_percent_encode("hello world"), "hello%20world");
+        assert_eq!(simple_percent_encode("D:\\dev\\repo"), "D%3A%5Cdev%5Crepo");
+        assert_eq!(simple_percent_encode("foo-bar_baz.txt~"), "foo-bar_baz.txt~");
+    }
+
+    #[test]
+    fn test_codeshark_file_read_write_and_info() {
+        let test_dir = std::env::temp_dir().join(format!("codeshark_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+
+        let test_file = test_dir.join("sample.txt");
+        let content = "Hello CodeShark IDE!";
+        assert!(write_text_file(test_file.to_string_lossy().to_string(), content.to_string()).is_ok());
+
+        let read_back = read_text_file(test_file.to_string_lossy().to_string()).unwrap();
+        assert_eq!(read_back, content);
+
+        let info = get_path_info(test_file.to_string_lossy().to_string()).unwrap();
+        assert!(info.exists);
+        assert!(!info.is_dir);
+
+        let dir_info = get_path_info(test_dir.to_string_lossy().to_string()).unwrap();
+        assert!(dir_info.exists);
+        assert!(dir_info.is_dir);
+
+        let entries = read_dir_entries(test_dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "sample.txt");
+        assert!(!entries[0].is_dir);
+
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[tokio::test]
+    async fn test_codeshark_git_status_and_head_content() {
+        let test_dir = std::env::temp_dir().join(format!("codeshark_git_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+
+        let repo = git2::Repository::init(&test_dir).unwrap();
+        let sig = git2::Signature::now("Shark Tester", "test@gitshark.com").unwrap();
+
+        let file_path = test_dir.join("main.rs");
+        std::fs::write(&file_path, "fn main() {\n    println!(\"Initial\");\n}\n").unwrap();
+
+        // Commit file into repo HEAD
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("main.rs")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+
+        // Verify reading HEAD content
+        let head_content = get_file_git_head_content(
+            test_dir.to_string_lossy().to_string(),
+            file_path.to_string_lossy().to_string(),
+        ).await.unwrap();
+        assert_eq!(head_content, Some("fn main() {\n    println!(\"Initial\");\n}\n".to_string()));
+
+        // Modify file on disk
+        std::fs::write(&file_path, "fn main() {\n    println!(\"Modified\");\n}\n").unwrap();
+
+        // Verify status shows modified
+        let status = get_repo_git_status(test_dir.to_string_lossy().to_string()).await.unwrap();
+        assert_eq!(status.get("main.rs").map(|s| s.as_str()), Some("modified"));
+
         let _ = std::fs::remove_dir_all(&test_dir);
     }
 }

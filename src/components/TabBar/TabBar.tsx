@@ -9,13 +9,14 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Code,
 } from "lucide-react";
 import { SyncButton } from "./SyncButton";
 import { OpenRepoDropdown } from "./OpenRepoDropdown";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { useSharkStore, computeSharkRank } from "@/store/useSharkStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
-import { openInBrowserIpc } from "@/lib/ipc";
+import { openInBrowserIpc, launchOrFocusCodeShark } from "@/lib/ipc";
 
 export const TabBar: React.FC = () => {
   const {
@@ -181,6 +182,16 @@ export const TabBar: React.FC = () => {
           >
             <Download className="w-3.5 h-3.5 text-sky-400" />
             <span className="hidden sm:inline">Clone</span>
+          </button>
+
+          {/* CodeShark IDE Launcher Button */}
+          <button
+            onClick={() => launchOrFocusCodeShark(activeTab?.path || undefined)}
+            className="flex items-center gap-1 h-7 px-2 ml-1 rounded text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/50 text-xs transition-colors border border-transparent hover:border-cyan-800/60 flex-shrink-0"
+            title={activeTab ? "Open Repository in CodeShark IDE (Ctrl+Alt+C)" : "Open CodeShark IDE (Ctrl+Alt+O)"}
+          >
+            <Code className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden lg:inline text-[11px] font-medium">CodeShark</span>
           </button>
         </div>
       </div>

@@ -701,37 +701,39 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
 
                       {/* Hunk Lines */}
                       <div className="overflow-x-auto">
-                        {hunk.lines.map((line, lIdx) => {
-                          const isAdd = line.origin === "+";
-                          const isDel = line.origin === "-";
-                          return (
-                            <div
-                              key={lIdx}
-                              className={`flex items-center leading-5 ${
-                                isAdd
-                                  ? "bg-emerald-950/30 text-emerald-300"
-                                  : isDel
-                                  ? "bg-rose-950/30 text-rose-300"
-                                  : "text-slate-400"
-                              }`}
-                            >
-                              <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px]">
-                                {line.old_lineno ?? ""}
-                              </span>
-                              <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px]">
-                                {line.new_lineno ?? ""}
-                              </span>
-                              <span className="w-5 text-center select-none font-bold">
-                                {line.origin === "+" || line.origin === "-"
-                                  ? line.origin
-                                  : " "}
-                              </span>
-                              <span className="flex-1 pr-3 whitespace-pre overflow-x-auto">
-                                {line.content}
-                              </span>
-                            </div>
-                          );
-                        })}
+                        <div className="min-w-full w-fit">
+                          {hunk.lines.map((line, lIdx) => {
+                            const isAdd = line.origin === "+";
+                            const isDel = line.origin === "-";
+                            return (
+                              <div
+                                key={lIdx}
+                                className={`flex items-center leading-5 min-w-full w-fit ${
+                                  isAdd
+                                    ? "bg-emerald-950/30 text-emerald-300"
+                                    : isDel
+                                    ? "bg-rose-950/30 text-rose-300"
+                                    : "text-slate-400"
+                                }`}
+                              >
+                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] flex-shrink-0">
+                                  {line.old_lineno ?? ""}
+                                </span>
+                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] flex-shrink-0">
+                                  {line.new_lineno ?? ""}
+                                </span>
+                                <span className="w-5 text-center select-none font-bold flex-shrink-0">
+                                  {line.origin === "+" || line.origin === "-"
+                                    ? line.origin
+                                    : " "}
+                                </span>
+                                <span className="flex-1 pr-3 whitespace-pre">
+                                  {line.content}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   ))}

@@ -22,6 +22,9 @@ import {
   Tag,
   History,
   FileText,
+  Code,
+  FolderPlus,
+  FilePlus,
 } from "lucide-react";
 import { useCommandPaletteStore, PaletteCategory } from "@/store/useCommandPaletteStore";
 import { useUpdateStore } from "@/store/useUpdateStore";
@@ -34,6 +37,9 @@ import {
   getCommitGraphIpc,
   getSavedOpenReposIpc,
   listDevFoldersIpc,
+  launchOrFocusCodeShark,
+  pickDirectory,
+  pickFile,
   type DevFolderItem,
 } from "@/lib/ipc";
 import { showPrompt } from "@/store/useDialogStore";
@@ -432,10 +438,92 @@ export const CommandPaletteModal: React.FC = () => {
               .openBlame(activeTab.repoId!, selPath, tabId, "history");
           },
         });
+
+        items.push({
+          id: "action-edit-codeshark-selected",
+          category: "actions",
+          title: `Edit in CodeShark: ${baseName}`,
+          subtitle: `Open and edit ${selPath} in CodeShark IDE`,
+          badge: "CodeShark",
+          badgeColor: "bg-cyan-950 text-cyan-300 border-cyan-800",
+          icon: <Code className="w-4 h-4 text-cyan-400" />,
+          keywords: ["edit", "codeshark", "code", "ide", "file", selPath, baseName],
+          onSelect: async () => {
+            close();
+            const fullPath = activeTab.path
+              ? `${activeTab.path}/${selPath}`.replace(/\/+/g, "/")
+              : selPath;
+            await launchOrFocusCodeShark(fullPath);
+          },
+        });
       }
+
+      items.push({
+        id: "action-open-repo-codeshark",
+        category: "actions",
+        title: "Open Current Repository in CodeShark",
+        subtitle: `Launch or focus CodeShark IDE rooted at ${activeTab.title}`,
+        badge: "CodeShark",
+        badgeColor: "bg-cyan-950 text-cyan-300 border-cyan-800",
+        icon: <Code className="w-4 h-4 text-cyan-400" />,
+        keywords: ["codeshark", "code", "editor", "ide", "vscode", "edit", activeTab.title],
+        shortcut: "Ctrl+Alt+C",
+        onSelect: async () => {
+          close();
+          await launchOrFocusCodeShark(activeTab.path || undefined);
+        },
+      });
     }
 
     // Global Actions (always available)
+    items.push({
+      id: "action-codeshark-launch",
+      category: "actions",
+      title: "Open CodeShark IDE",
+      subtitle: "Launch or bring CodeShark single-instance window to focus",
+      icon: <Code className="w-4 h-4 text-cyan-400" />,
+      badge: "Ctrl+Alt+O",
+      badgeColor: "bg-cyan-950 text-cyan-300 border-cyan-800",
+      keywords: ["codeshark", "code", "ide", "editor", "vscode"],
+      shortcut: "Ctrl+Alt+O",
+      onSelect: async () => {
+        close();
+        await launchOrFocusCodeShark();
+      },
+    });
+
+    items.push({
+      id: "action-codeshark-add-folder",
+      category: "actions",
+      title: "Add Folder to CodeShark Workspace...",
+      subtitle: "Pick a directory to open or add as a project in CodeShark",
+      icon: <FolderPlus className="w-4 h-4 text-cyan-400" />,
+      keywords: ["codeshark", "folder", "directory", "add", "project"],
+      onSelect: async () => {
+        close();
+        const dir = await pickDirectory("Select Directory to Open in CodeShark");
+        if (dir) {
+          await launchOrFocusCodeShark(dir);
+        }
+      },
+    });
+
+    items.push({
+      id: "action-codeshark-open-file",
+      category: "actions",
+      title: "Open File in CodeShark...",
+      subtitle: "Pick an individual file to edit in CodeShark",
+      icon: <FilePlus className="w-4 h-4 text-cyan-400" />,
+      keywords: ["codeshark", "file", "edit", "open file"],
+      onSelect: async () => {
+        close();
+        const file = await pickFile("Select File to Open in CodeShark");
+        if (file) {
+          await launchOrFocusCodeShark(file);
+        }
+      },
+    });
+
     items.push({
       id: "action-open-repo",
       category: "actions",

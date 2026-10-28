@@ -13,6 +13,7 @@ import { CommandPaletteModal } from "@/components/palette/CommandPaletteModal";
 import { FileBlameModal } from "@/components/blame/FileBlameModal";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { useUpdateStore } from "@/store/useUpdateStore";
+import { launchOrFocusCodeShark } from "@/lib/ipc";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId, initWorkspaceSession } = useWorkspaceStore();
@@ -38,6 +39,23 @@ export const App: React.FC = () => {
       ) {
         e.preventDefault();
         useCommandPaletteStore.getState().toggle();
+        return;
+      }
+
+      // CodeShark IDE: Ctrl+Alt+C / Cmd+Alt+C (Open current repository in CodeShark)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        const currentTab = useWorkspaceStore
+          .getState()
+          .tabs.find((t) => t.id === useWorkspaceStore.getState().activeTabId);
+        launchOrFocusCodeShark(currentTab?.path || undefined);
+        return;
+      }
+
+      // CodeShark IDE: Ctrl+Alt+O / Cmd+Alt+O (Launch or focus CodeShark)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        launchOrFocusCodeShark();
         return;
       }
 

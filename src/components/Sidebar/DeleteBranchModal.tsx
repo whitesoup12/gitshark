@@ -24,13 +24,16 @@ export const DeleteBranchModal: React.FC<DeleteBranchModalProps> = ({
   const [removeAssociatedWorktree, setRemoveAssociatedWorktree] = useState(true);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
+  const cleanName = branchName.replace(/^refs\/heads\//, "").replace(/^refs\/remotes\//, "");
+
   const associatedWorktree =
     !isRemote && worktrees
       ? worktrees.find(
           (w) =>
+            w.branch === cleanName ||
             w.branch === branchName ||
-            w.branch === `refs/heads/${branchName}` ||
-            (w.branch && w.branch.endsWith(`/${branchName}`))
+            w.branch === `refs/heads/${cleanName}` ||
+            (w.branch && w.branch.endsWith(`/${cleanName}`))
         )
       : undefined;
 

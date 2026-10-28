@@ -2015,17 +2015,19 @@ pub fn delete_branch(
             .delete()
             .map_err(|e| format!("Failed to delete remote branch '{branch_name}': {e}"))?;
     } else {
+        let clean_name = branch_name.trim_start_matches("refs/heads/");
         if let Ok(head) = repo.head() {
             if let Some(shorthand) = head.shorthand() {
-                if shorthand == branch_name {
+                if shorthand == branch_name || shorthand == clean_name {
                     return Err(format!(
-                        "Cannot delete currently active branch '{branch_name}'. Please switch to another branch first."
+                        "Cannot delete currently active branch '{clean_name}'. Please switch to another branch first."
                     ));
                 }
             }
         }
         let mut branch = repo
-            .find_branch(branch_name, git2::BranchType::Local)
+            .find_branch(clean_name, git2::BranchType::Local)
+            .or_else(|_| repo.find_branch(branch_name, git2::BranchType::Local))
             .map_err(|e| format!("Local branch '{branch_name}' not found: {e}"))?;
         branch
             .delete()

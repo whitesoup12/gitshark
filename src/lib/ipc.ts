@@ -1834,5 +1834,135 @@ export async function getFileHistoryIpc(
   return await invoke<FileHistoryItem[]>("get_file_history", { repoId, path });
 }
 
+/**
+ * Open native file picker to select an individual file
+ */
+export async function pickFile(title = "Select File"): Promise<string | null> {
+  try {
+    const selected = await openDialog({
+      directory: false,
+      multiple: false,
+      title,
+    });
+
+    if (Array.isArray(selected)) {
+      return selected[0] ?? null;
+    }
+    return selected;
+  } catch (err) {
+    if (!isTauriEnvironment()) {
+      const promptPath = await showPrompt({
+        title,
+        message: "Enter absolute path to file:",
+        placeholder: "/path/to/file.ext",
+        confirmText: "Open",
+      });
+      return promptPath && promptPath.trim().length > 0 ? promptPath.trim() : null;
+    }
+    console.error("Failed to open native file dialog:", err);
+    return null;
+  }
+}
+
+/**
+ * Launch or bring existing CodeShark window to focus, optionally targeting a path
+ */
+export async function launchOrFocusCodeShark(targetPath?: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info("[Mock] launch_or_focus_codeshark target:", targetPath);
+    const win = window.open(`/?app=codeshark${targetPath ? `&initPath=${encodeURIComponent(targetPath)}` : ""}`, "codeshark");
+    win?.focus();
+    return;
+  }
+  await invoke("launch_or_focus_codeshark", { targetPath: targetPath ?? null });
+}
+
+/**
+ * Query whether a target path exists and is a directory or file
+ */
+export async function getPathInfoIpc(targetPath: string): Promise<{ path: string; name: string; is_dir: boolean; exists: boolean }> {
+  if (!isTauriEnvironment()) {
+    const isDir = !targetPath.includes(".");
+    const parts = targetPath.split(/[/\\]/);
+    return {
+      path: targetPath,
+      name: parts[parts.length - 1] || targetPath,
+      is_dir: isDir,
+      exists: true,
+    };
+  }
+  return await invoke("get_path_info", { targetPath });
+}
+
+/**
+ * Read contents of a directory (lazy loaded for CodeShark explorer)
+ */
+export async function readDirEntriesIpc(dirPath: string): Promise<Array<{ name: string; path: string; is_dir: boolean; size?: number | null }>> {
+  if (!isTauriEnvironment()) {
+    return [
+      { name: "src", path: `${dirPath}/src`, is_dir: true },
+      { name: "package.json", path: `${dirPath}/package.json`, is_dir: false, size: 1024 },
+      { name: "README.md", path: `${dirPath}/README.md`, is_dir: false, size: 2048 },
+    ];
+  }
+  return await invoke("read_dir_entries", { dirPath });
+}
+
+/**
+ * Read full text content of a file
+ */
+export async function readTextFileIpc(filePath: string): Promise<string> {
+  if (!isTauriEnvironment()) {
+    return `// Mock content for ${filePath}\nconsole.log("Hello from CodeShark!");\n`;
+  }
+  return await invoke<string>("read_text_file", { filePath });
+}
+
+/**
+ * Write updated text content back to disk
+ */
+export async function writeTextFileIpc(filePath: string, content: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info(`[Mock] Saved ${filePath} (${content.length} bytes)`);
+    return;
+  }
+  await invoke("write_text_file", { filePath, content });
+}
+
+/**
+ * Fetch Git working tree status for a directory (mapping relative paths to status strings)
+ */
+export async function getRepoGitStatusIpc(dirPath: string): Promise<Record<string, string>> {
+  if (!isTauriEnvironment()) {
+    return {
+      "src/App.tsx": "modified",
+      "README.md": "staged",
+    };
+  }
+  try {
+    return await invoke<Record<string, string>>("get_repo_git_status", { dirPath });
+  } catch (err) {
+    console.warn(`Failed to get git status for ${dirPath}:`, err);
+    return {};
+  }
+}
+
+/**
+ * Fetch Git HEAD committed content for a file to compute live line change decorations
+ */
+export async function getFileGitHeadContentIpc(dirPath: string, filePath: string): Promise<string | null> {
+  if (!isTauriEnvironment()) {
+    return null;
+  }
+  try {
+    return await invoke<string | null>("get_file_git_head_content", { dirPath, filePath });
+  } catch (err) {
+    console.warn(`Failed to get HEAD content for ${filePath}:`, err);
+    return null;
+  }
+}
+
+
+
 
 
