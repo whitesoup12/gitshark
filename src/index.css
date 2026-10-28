@@ -187,3 +187,20 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* CodeShark Git Gutter Change Indicators */
+.git-gutter-added {
+  border-left: 3.5px solid #10b981 !important;
+  margin-left: 3px !important;
+}
+
+.git-gutter-modified {
+  border-left: 3.5px solid #06b6d4 !important;
+  margin-left: 3px !important;
+}
+
+.git-gutter-deleted {
+  border-left: 3.5px solid #ef4444 !important;
+  border-bottom: 2px solid #ef4444 !important;
+  margin-left: 3px !important;
+}

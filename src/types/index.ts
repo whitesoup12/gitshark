@@ -8,3 +8,4 @@ export * from "./worktree";
 export * from "./remote";
 export * from "./settings";
 export * from "./compare";
+export * from "./codeshark";

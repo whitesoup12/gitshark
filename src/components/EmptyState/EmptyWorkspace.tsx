@@ -1,8 +1,9 @@
 import React from "react";
-import { FolderGit2, Plus, Terminal, GitFork, Command, Download } from "lucide-react";
+import { FolderGit2, Plus, Terminal, GitFork, Command, Download, Code } from "lucide-react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { APP_VERSION } from "@/constants/version";
+import { launchOrFocusCodeShark } from "@/lib/ipc";
 
 import { useSharkStore } from "@/store/useSharkStore";
 
@@ -66,6 +67,14 @@ export const EmptyWorkspace: React.FC = () => {
           >
             <Plus className="w-4 h-4" />
             <span>New Tab</span>
+          </button>
+
+          <button
+            onClick={() => launchOrFocusCodeShark()}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-800/60 font-semibold text-xs transition-colors shadow-sm"
+          >
+            <Code className="w-4 h-4 text-cyan-400" />
+            <span>CodeShark IDE</span>
           </button>
         </div>
 

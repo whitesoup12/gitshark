@@ -371,7 +371,7 @@ export const FileBlameModal: React.FC = () => {
                           key={lineNo}
                           onMouseEnter={() => hunk && setHoveredCommitId(hunk.commit_id)}
                           onMouseLeave={() => setHoveredCommitId(null)}
-                          className={`flex items-stretch border-b border-shark-900/40 transition-colors group ${
+                          className={`flex items-stretch border-b border-shark-900/40 transition-colors group min-w-full w-fit ${
                             isCommitHovered
                               ? "bg-sky-500/10"
                               : isFirstLineOfHunk
@@ -425,7 +425,7 @@ export const FileBlameModal: React.FC = () => {
                           </div>
 
                           {/* Code Line Content */}
-                          <div className="flex-1 px-3 py-0.5 whitespace-pre overflow-x-auto text-slate-200 text-[12px] leading-relaxed">
+                          <div className="flex-1 px-3 py-0.5 whitespace-pre text-slate-200 text-[12px] leading-relaxed">
                             {lineContent || " "}
                           </div>
                         </div>
@@ -634,94 +634,105 @@ export const FileBlameModal: React.FC = () => {
 
                               {diffViewMode === "unified" ? (
                                 /* Unified Hunk View */
-                                <div className="divide-y divide-shark-900/40">
-                                  {hunk.lines.map((line, lineIdx) => {
-                                    const isAdd = line.origin === "+";
-                                    const isDel = line.origin === "-";
+                                <div className="overflow-x-auto">
+                                  <div className="divide-y divide-shark-900/40 min-w-full w-fit">
+                                    {hunk.lines.map((line, lineIdx) => {
+                                      const isAdd = line.origin === "+";
+                                      const isDel = line.origin === "-";
 
-                                    return (
-                                      <div
-                                        key={lineIdx}
-                                        className={`flex items-start select-text ${
-                                          isAdd
-                                            ? "bg-emerald-950/30 text-emerald-300 border-l-2 border-emerald-500"
-                                            : isDel
-                                            ? "bg-rose-950/35 text-rose-300 border-l-2 border-rose-500"
-                                            : "text-slate-300 border-l-2 border-transparent"
-                                        }`}
-                                      >
-                                        <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px]">
-                                          {line.old_lineno ?? ""}
-                                        </span>
-                                        <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60">
-                                          {line.new_lineno ?? ""}
-                                        </span>
-                                        <span className="w-6 py-0.5 text-center font-bold select-none text-slate-500">
-                                          {line.origin === " " ? "" : line.origin}
-                                        </span>
-                                        <span className="flex-1 py-0.5 pr-2 whitespace-pre overflow-x-auto">
-                                          {line.content || " "}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
+                                      return (
+                                        <div
+                                          key={lineIdx}
+                                          className={`flex items-start select-text min-w-full w-fit ${
+                                            isAdd
+                                              ? "bg-emerald-950/30 text-emerald-300 border-l-2 border-emerald-500"
+                                              : isDel
+                                              ? "bg-rose-950/35 text-rose-300 border-l-2 border-rose-500"
+                                              : "text-slate-300 border-l-2 border-transparent"
+                                          }`}
+                                        >
+                                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] flex-shrink-0">
+                                            {line.old_lineno ?? ""}
+                                          </span>
+                                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60 flex-shrink-0">
+                                            {line.new_lineno ?? ""}
+                                          </span>
+                                          <span className="w-6 py-0.5 text-center font-bold select-none text-slate-500 flex-shrink-0">
+                                            {line.origin === " " ? "" : line.origin}
+                                          </span>
+                                          <span className="flex-1 py-0.5 pr-4 whitespace-pre">
+                                            {line.content || " "}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               ) : (
                                 /* Split Hunk View */
-                                <div className="divide-y divide-shark-900/40">
-                                  {hunk.lines.map((line, lineIdx) => {
-                                    const isAdd = line.origin === "+";
-                                    const isDel = line.origin === "-";
+                                <div className="overflow-x-auto">
+                                  <table className="w-full min-w-full border-collapse">
+                                    <colgroup>
+                                      <col className="w-1/2" />
+                                      <col className="w-1/2" />
+                                    </colgroup>
+                                    <tbody className="divide-y divide-shark-900/40">
+                                      {hunk.lines.map((line, lineIdx) => {
+                                        const isAdd = line.origin === "+";
+                                        const isDel = line.origin === "-";
 
-                                    return (
-                                      <div
-                                        key={lineIdx}
-                                        className="grid grid-cols-2 divide-x divide-shark-800 select-text"
-                                      >
-                                        {/* Left column (Old) */}
-                                        <div
-                                          className={`flex items-start ${
-                                            isDel
-                                              ? "bg-rose-950/35 text-rose-300"
-                                              : isAdd
-                                              ? "bg-shark-950/50 text-transparent select-none"
-                                              : "text-slate-300"
-                                          }`}
-                                        >
-                                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60">
-                                            {line.old_lineno ?? ""}
-                                          </span>
-                                          <span className="w-5 py-0.5 text-center font-bold select-none text-rose-400">
-                                            {isDel ? "-" : ""}
-                                          </span>
-                                          <span className="flex-1 py-0.5 pr-2 whitespace-pre overflow-x-auto">
-                                            {!isAdd ? line.content : ""}
-                                          </span>
-                                        </div>
+                                        return (
+                                          <tr key={lineIdx} className="select-text">
+                                            {/* Left column (Old) */}
+                                            <td
+                                              className={`p-0 align-top border-r border-shark-800 ${
+                                                isDel
+                                                  ? "bg-rose-950/35 text-rose-300"
+                                                  : isAdd
+                                                  ? "bg-shark-950/50 text-transparent select-none"
+                                                  : "text-slate-300"
+                                              }`}
+                                            >
+                                              <div className="flex items-start">
+                                                <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60 flex-shrink-0">
+                                                  {line.old_lineno ?? ""}
+                                                </span>
+                                                <span className="w-5 py-0.5 text-center font-bold select-none text-rose-400 flex-shrink-0">
+                                                  {isDel ? "-" : ""}
+                                                </span>
+                                                <span className="flex-1 py-0.5 pr-4 whitespace-pre">
+                                                  {!isAdd ? line.content || " " : " "}
+                                                </span>
+                                              </div>
+                                            </td>
 
-                                        {/* Right column (New) */}
-                                        <div
-                                          className={`flex items-start ${
-                                            isAdd
-                                              ? "bg-emerald-950/30 text-emerald-300"
-                                              : isDel
-                                              ? "bg-shark-950/50 text-transparent select-none"
-                                              : "text-slate-300"
-                                          }`}
-                                        >
-                                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60">
-                                            {line.new_lineno ?? ""}
-                                          </span>
-                                          <span className="w-5 py-0.5 text-center font-bold select-none text-emerald-400">
-                                            {isAdd ? "+" : ""}
-                                          </span>
-                                          <span className="flex-1 py-0.5 pr-2 whitespace-pre overflow-x-auto">
-                                            {!isDel ? line.content : ""}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                            {/* Right column (New) */}
+                                            <td
+                                              className={`p-0 align-top ${
+                                                isAdd
+                                                  ? "bg-emerald-950/30 text-emerald-300"
+                                                  : isDel
+                                                  ? "bg-shark-950/50 text-transparent select-none"
+                                                  : "text-slate-300"
+                                              }`}
+                                            >
+                                              <div className="flex items-start">
+                                                <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60 flex-shrink-0">
+                                                  {line.new_lineno ?? ""}
+                                                </span>
+                                                <span className="w-5 py-0.5 text-center font-bold select-none text-emerald-400 flex-shrink-0">
+                                                  {isAdd ? "+" : ""}
+                                                </span>
+                                                <span className="flex-1 py-0.5 pr-4 whitespace-pre">
+                                                  {!isDel ? line.content || " " : " "}
+                                                </span>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
                                 </div>
                               )}
                             </div>

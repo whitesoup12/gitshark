@@ -1866,16 +1866,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("Failed to delete branch:", errMsg);
 
-      // Check if error is because it is checked out in a linked worktree
-      if (!isRemote && (errMsg.includes("checked out at") || errMsg.includes("worktree"))) {
-        const linkedWorktree = tab.worktrees?.find(
-          (w) => !w.is_main && (w.branch === branchName || w.branch === `refs/heads/${branchName}` || (w.branch && w.branch.endsWith(`/${branchName}`)))
+      // Check if error is because it is checked out in a linked worktree or referencing HEAD
+      if (!isRemote && (errMsg.includes("checked out at") || errMsg.includes("worktree") || errMsg.includes("HEAD") || errMsg.includes("head"))) {
+        let currentWorktrees = tab.worktrees;
+        if (!currentWorktrees || currentWorktrees.length === 0) {
+          currentWorktrees = (await get().fetchWorktrees(tabId)) || undefined;
+        }
+
+        const cleanName = branchName.replace(/^refs\/heads\//, "").replace(/^refs\/remotes\//, "");
+        const linkedWorktree = currentWorktrees?.find(
+          (w) =>
+            !w.is_main &&
+            (w.branch === cleanName ||
+              w.branch === branchName ||
+              w.branch === `refs/heads/${cleanName}` ||
+              (w.branch && w.branch.endsWith(`/${cleanName}`)))
         );
 
         if (linkedWorktree) {
           const proceed = await showConfirm({
             title: "Branch In Use By Worktree",
-            message: `Branch "${branchName}" cannot be deleted because it is checked out at linked worktree:\n"${linkedWorktree.path}"\n\nWould you like to remove this worktree and delete the branch?`,
+            message: `Branch "${cleanName}" cannot be deleted because it is checked out at linked worktree:\n"${linkedWorktree.path}"\n\nWould you like to remove this worktree and delete the branch?`,
             confirmText: "Remove Worktree & Delete Branch",
             variant: "danger",
           });
@@ -1883,12 +1894,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           if (proceed) {
             const removed = await get().removeWorktree(tabId, linkedWorktree.path, true);
             if (removed) {
+              await get().pruneWorktrees(tabId);
               try {
-                await deleteBranchIpc(tab.repoId, branchName, isRemote);
+                await deleteBranchIpc(tab.repoId, cleanName, isRemote);
                 useSharkStore.getState().recordSharkStat("chomp", 1);
                 useSharkStore
                   .getState()
-                  .triggerCelebration("chomp", `Chomped branch '${branchName}'! 🦈`);
+                  .triggerCelebration("chomp", `Chomped branch '${cleanName}'! 🦈`);
                 await Promise.all([
                   get().refreshTabMetadata(tabId),
                   get().fetchBranches(tabId),

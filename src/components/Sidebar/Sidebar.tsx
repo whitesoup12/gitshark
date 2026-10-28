@@ -235,6 +235,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
       if (options?.removeWorktreePath) {
         const removed = await removeWorktree(tab.id, options.removeWorktreePath, true);
         if (!removed) return;
+        await pruneWorktrees(tab.id);
       }
       const success = await deleteBranch(tab.id, branchToDelete.branchName, branchToDelete.isRemote);
       if (success) {

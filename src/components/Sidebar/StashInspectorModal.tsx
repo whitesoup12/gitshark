@@ -420,37 +420,39 @@ export const StashInspectorModal: React.FC<StashInspectorModalProps> = ({
                       </div>
 
                       {/* Hunk Lines */}
-                      <div className="overflow-x-auto divide-y divide-shark-900/30">
-                        {hunk.lines.map((line, lIdx) => {
-                          const isAdd = line.origin === "+";
-                          const isDel = line.origin === "-";
+                      <div className="overflow-x-auto">
+                        <div className="divide-y divide-shark-900/30 min-w-full w-fit">
+                          {hunk.lines.map((line, lIdx) => {
+                            const isAdd = line.origin === "+";
+                            const isDel = line.origin === "-";
 
-                          return (
-                            <div
-                              key={lIdx}
-                              className={`flex items-center leading-5 hover:bg-white/[0.02] ${
-                                isAdd
-                                  ? "bg-emerald-950/30 text-emerald-300"
-                                  : isDel
-                                  ? "bg-rose-950/30 text-rose-300"
-                                  : "text-slate-300"
-                              }`}
-                            >
-                              <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40">
-                                {line.old_lineno ?? ""}
-                              </span>
-                              <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40">
-                                {line.new_lineno ?? ""}
-                              </span>
-                              <span className="w-5 text-center select-none font-bold text-xs flex-shrink-0">
-                                {line.origin === "+" || line.origin === "-" ? line.origin : " "}
-                              </span>
-                              <span className="flex-1 pr-3 whitespace-pre overflow-x-auto">
-                                {line.content}
-                              </span>
-                            </div>
-                          );
-                        })}
+                            return (
+                              <div
+                                key={lIdx}
+                                className={`flex items-center leading-5 hover:bg-white/[0.02] min-w-full w-fit ${
+                                  isAdd
+                                    ? "bg-emerald-950/30 text-emerald-300"
+                                    : isDel
+                                    ? "bg-rose-950/30 text-rose-300"
+                                    : "text-slate-300"
+                                }`}
+                              >
+                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                  {line.old_lineno ?? ""}
+                                </span>
+                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                  {line.new_lineno ?? ""}
+                                </span>
+                                <span className="w-5 text-center select-none font-bold text-xs flex-shrink-0">
+                                  {line.origin === "+" || line.origin === "-" ? line.origin : " "}
+                                </span>
+                                <span className="flex-1 pr-3 whitespace-pre">
+                                  {line.content}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   ))}

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { FileDiff, DiffHunk } from "@/types";
 import { useBlameStore } from "@/store/useBlameStore";
+import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { launchOrFocusCodeShark } from "@/lib/ipc";
 import {
   Split,
   AlignJustify,
@@ -15,6 +17,7 @@ import {
   CheckSquare,
   Square,
   X,
+  Code,
 } from "lucide-react";
 
 interface DiffViewerProps {
@@ -371,6 +374,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 <History className="w-3.5 h-3.5 text-indigo-400" />
                 <span>History</span>
               </button>
+              <button
+                onClick={() => {
+                  const tab = useWorkspaceStore
+                    .getState()
+                    .tabs.find((t) => t.id === tabId || t.repoId === repoId);
+                  const fullPath = tab?.path
+                    ? `${tab.path}/${filePath}`.replace(/\/+/g, "/")
+                    : filePath;
+                  launchOrFocusCodeShark(fullPath || undefined);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-slate-400 hover:text-cyan-300 hover:bg-shark-800/60 transition-colors"
+                title="Edit this file in CodeShark IDE"
+              >
+                <Code className="w-3.5 h-3.5 text-cyan-400" />
+                <span>CodeShark</span>
+              </button>
             </div>
           )}
 
@@ -563,17 +582,18 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 {/* Hunk Lines Rendering */}
                 {viewMode === "unified" ? (
                   /* Unified View with Line-Level Staging */
-                  <div className="divide-y divide-shark-900/30">
-                    {hunk.lines.map((line, lineIdx) => {
-                      const isAdd = line.origin === "+";
-                      const isDel = line.origin === "-";
-                      const isModifiable = isAdd || isDel;
-                      const isLineSelected = hunkSelectedLines.has(lineIdx);
+                  <div className="overflow-x-auto">
+                    <div className="divide-y divide-shark-900/30 min-w-full w-fit">
+                      {hunk.lines.map((line, lineIdx) => {
+                        const isAdd = line.origin === "+";
+                        const isDel = line.origin === "-";
+                        const isModifiable = isAdd || isDel;
+                        const isLineSelected = hunkSelectedLines.has(lineIdx);
 
-                      return (
-                        <div
-                          key={lineIdx}
-                          className={`flex items-start select-text group/line transition-colors ${
+                        return (
+                          <div
+                            key={lineIdx}
+                            className={`flex items-start select-text group/line transition-colors min-w-full w-fit ${
                             isLineSelected
                               ? "bg-sky-500/20 text-slate-100 border-l-4 border-sky-400"
                               : isAdd
@@ -635,15 +655,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                           </div>
 
                           {/* Old line number */}
-                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px]">
+                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] flex-shrink-0">
                             {line.old_lineno ?? ""}
                           </span>
                           {/* New line number */}
-                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60">
+                          <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60 flex-shrink-0">
                             {line.new_lineno ?? ""}
                           </span>
                           {/* Origin symbol (+ / - / space) */}
-                          <span className="w-6 py-0.5 text-center font-bold select-none text-slate-500">
+                          <span className="w-6 py-0.5 text-center font-bold select-none text-slate-500 flex-shrink-0">
                             {line.origin === " " ? "" : line.origin}
                           </span>
                           {/* Line content text */}
@@ -653,7 +673,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                                 handleToggleLine(hunkIdx, lineIdx, e.shiftKey);
                               }
                             }}
-                            className="flex-1 py-0.5 pr-2 whitespace-pre overflow-x-auto"
+                            className="flex-1 py-0.5 pr-4 whitespace-pre"
                           >
                             {line.content || " "}
                           </span>
@@ -674,19 +694,21 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 ) : (
                   /* Split Side-by-Side View with Line-Level Staging */
-                  <div className="divide-y divide-shark-900/40">
-                    {hunk.lines.map((line, lineIdx) => {
-                      const isAdd = line.origin === "+";
-                      const isDel = line.origin === "-";
-                      const isLineSelected = hunkSelectedLines.has(lineIdx);
+                  <div className="overflow-x-auto">
+                    <div className="divide-y divide-shark-900/40 min-w-full w-fit">
+                      {hunk.lines.map((line, lineIdx) => {
+                        const isAdd = line.origin === "+";
+                        const isDel = line.origin === "-";
+                        const isLineSelected = hunkSelectedLines.has(lineIdx);
 
-                      return (
-                        <div
-                          key={lineIdx}
-                          className={`grid grid-cols-2 divide-x divide-shark-800 select-text group/line ${
+                        return (
+                          <div
+                            key={lineIdx}
+                            className={`grid grid-cols-2 divide-x divide-shark-800 select-text group/line min-w-full w-fit ${
                             isLineSelected ? "bg-sky-500/20 border-l-4 border-sky-400" : ""
                           }`}
                         >
@@ -721,13 +743,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                               )}
                             </div>
 
-                            <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60">
+                            <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60 flex-shrink-0">
                               {line.old_lineno ?? ""}
                             </span>
-                            <span className="w-5 py-0.5 text-center font-bold select-none text-rose-400">
+                            <span className="w-5 py-0.5 text-center font-bold select-none text-rose-400 flex-shrink-0">
                               {isDel ? "-" : ""}
                             </span>
-                            <span className="flex-1 py-0.5 pr-2 whitespace-pre overflow-x-auto">
+                            <span className="flex-1 py-0.5 pr-4 whitespace-pre">
                               {!isAdd ? line.content : ""}
                             </span>
 
@@ -796,13 +818,13 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                               )}
                             </div>
 
-                            <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60">
+                            <span className="w-10 px-2 py-0.5 text-right text-slate-500 select-none text-[10.5px] border-r border-shark-800/60 flex-shrink-0">
                               {line.new_lineno ?? ""}
                             </span>
-                            <span className="w-5 py-0.5 text-center font-bold select-none text-emerald-400">
+                            <span className="w-5 py-0.5 text-center font-bold select-none text-emerald-400 flex-shrink-0">
                               {isAdd ? "+" : ""}
                             </span>
-                            <span className="flex-1 py-0.5 pr-2 whitespace-pre overflow-x-auto">
+                            <span className="flex-1 py-0.5 pr-4 whitespace-pre">
                               {!isDel ? line.content : ""}
                             </span>
 
@@ -842,6 +864,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 )}
               </div>
