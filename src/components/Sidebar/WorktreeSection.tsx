@@ -44,6 +44,7 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [newBranch, setNewBranch] = useState("");
+  const [pathTouched, setPathTouched] = useState(false);
   const [createBranch, setCreateBranch] = useState(true);
   const [noTrack, setNoTrack] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -66,10 +67,32 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
 
   const worktrees = tab.worktrees ?? [];
 
+  const handleBranchChange = (branchVal: string) => {
+    setNewBranch(branchVal);
+    if (!pathTouched) {
+      const cleanBranch = branchVal.trim().replace(/[/\\:]+/g, "-");
+      if (cleanBranch && tab.metadata?.path) {
+        const repoPath = tab.metadata.path.replace(/[\/\\]+$/, "");
+        const separator = repoPath.includes("\\") ? "\\" : "/";
+        setNewPath(`${repoPath}-worktrees${separator}${cleanBranch}`);
+      } else if (!cleanBranch) {
+        setNewPath("");
+      }
+    }
+  };
+
   const handleBrowsePath = async () => {
     const selected = await pickRepositoryDirectory();
     if (selected) {
-      setNewPath(selected);
+      setPathTouched(true);
+      const cleanSelected = selected.replace(/[\/\\]+$/, "");
+      const separator = cleanSelected.includes("\\") ? "\\" : "/";
+      const cleanBranch = newBranch.trim().replace(/[/\\:]+/g, "-");
+      if (cleanBranch && !cleanSelected.endsWith(cleanBranch)) {
+        setNewPath(`${cleanSelected}${separator}${cleanBranch}`);
+      } else {
+        setNewPath(cleanSelected);
+      }
     }
   };
 
@@ -89,6 +112,7 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
       if (success) {
         setNewPath("");
         setNewBranch("");
+        setPathTouched(false);
         setIsAdding(false);
       }
     } finally {
@@ -206,7 +230,10 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
                   <input
                     type="text"
                     value={newPath}
-                    onChange={(e) => setNewPath(e.target.value)}
+                    onChange={(e) => {
+                      setNewPath(e.target.value);
+                      setPathTouched(true);
+                    }}
                     placeholder="Worktree folder path"
                     className="flex-1 px-2 py-1 bg-shark-900 border border-shark-750 focus:border-sky-500 rounded text-[11px] font-mono text-slate-200 outline-none"
                     required
@@ -228,7 +255,7 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
                 <input
                   type="text"
                   value={newBranch}
-                  onChange={(e) => setNewBranch(e.target.value)}
+                  onChange={(e) => handleBranchChange(e.target.value)}
                   placeholder="e.g. feature/my-worktree"
                   className="w-full px-2 py-1 bg-shark-900 border border-shark-750 focus:border-sky-500 rounded text-[11px] font-mono text-slate-200 outline-none"
                   required
@@ -267,7 +294,12 @@ export const WorktreeSection: React.FC<WorktreeSectionProps> = ({
               <div className="flex items-center justify-end gap-1.5 pt-1">
                 <button
                   type="button"
-                  onClick={() => setIsAdding(false)}
+                  onClick={() => {
+                    setIsAdding(false);
+                    setNewPath("");
+                    setNewBranch("");
+                    setPathTouched(false);
+                  }}
                   className="px-2 py-0.5 rounded text-[10px] text-slate-400 hover:text-slate-200 hover:bg-shark-800"
                 >
                   Cancel

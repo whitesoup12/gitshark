@@ -1677,7 +1677,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       await get().refreshTabMetadata(tabId);
       return true;
     } catch (err) {
-      console.error("Failed to add worktree:", err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("Failed to add worktree:", errMsg);
+      showAlert({
+        title: "Add Worktree Failed",
+        message: errMsg,
+        variant: "danger",
+      });
       return false;
     }
   },

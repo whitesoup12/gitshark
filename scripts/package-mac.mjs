@@ -96,7 +96,7 @@ function renderCaskContent({ version, repoSlug, armHash, intelHash }) {
     strategy :github_latest
   end
 
-  auto_updates true
+  depends_on :macos
 
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
@@ -133,6 +133,8 @@ function renderLocalCaskContent({ version, repoSlug, dmgPath, sha256 }) {
   name "GitShark (Local Build)"
   desc "Blazingly fast, modern Git desktop client built with Tauri v2 and Rust"
   homepage "https://github.com/${repoSlug}"
+
+  depends_on :macos
 
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"
