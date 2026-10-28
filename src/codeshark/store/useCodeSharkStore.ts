@@ -33,8 +33,14 @@ interface CodeSharkState {
   toggleFolder: (folderPath: string) => Promise<void>;
   openFile: (filePath: string, name?: string, projectId?: string) => Promise<void>;
   closeTab: (filePath: string) => void;
+  closeOtherTabs: (filePath: string) => void;
+  closeTabsToTheRight: (filePath: string) => void;
+  closeAllTabs: () => void;
+  saveAllFiles: () => Promise<void>;
   updateFileContent: (filePath: string, content: string) => void;
   saveFile: (filePath?: string) => Promise<void>;
+  quietLinting: boolean;
+  toggleQuietLinting: () => void;
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
   refreshGitStatus: (projectId?: string) => Promise<void>;
@@ -264,6 +270,58 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
       openTabs: remaining,
       activeFilePath: nextActive,
     });
+  },
+
+  closeOtherTabs: (filePath: string) => {
+    const norm = normalizePath(filePath);
+    const target = get().openTabs.find((t) => normalizePath(t.path) === norm);
+    if (!target) return;
+    set({
+      openTabs: [target],
+      activeFilePath: target.path,
+    });
+  },
+
+  closeTabsToTheRight: (filePath: string) => {
+    const norm = normalizePath(filePath);
+    const currentTabs = get().openTabs;
+    const tabIndex = currentTabs.findIndex((t) => normalizePath(t.path) === norm);
+    if (tabIndex === -1) return;
+    const remaining = currentTabs.slice(0, tabIndex + 1);
+    let nextActive = get().activeFilePath;
+    if (nextActive && !remaining.some((t) => normalizePath(t.path) === normalizePath(nextActive!))) {
+      nextActive = remaining[remaining.length - 1].path;
+    }
+    set({
+      openTabs: remaining,
+      activeFilePath: nextActive,
+    });
+  },
+
+  closeAllTabs: () => {
+    set({
+      openTabs: [],
+      activeFilePath: null,
+    });
+  },
+
+  saveAllFiles: async () => {
+    const dirtyTabs = get().openTabs.filter((t) => t.isDirty);
+    for (const tab of dirtyTabs) {
+      await get().saveFile(tab.path);
+    }
+  },
+
+  quietLinting: true,
+  toggleQuietLinting: () => {
+    const next = !get().quietLinting;
+    set({
+      quietLinting: next,
+      statusMessage: next ? "Linting: Syntax Only (No squigglies)" : "Linting: Relaxed (Ignoring missing imports)",
+    });
+    setTimeout(() => {
+      set({ statusMessage: null });
+    }, 3000);
   },
 
   updateFileContent: (filePath: string, content: string) => {

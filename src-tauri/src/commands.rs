@@ -1110,10 +1110,54 @@ pub async fn add_worktree(
         (session.path.clone(), resolve_git_command())
     };
 
+    let raw_path = path.trim().trim_matches(['"', '\'']).trim();
+    let clean_path = if let Some(stripped) = raw_path.strip_prefix(r"\\?\\") {
+        stripped
+    } else {
+        raw_path
+    };
+    let clean_path = clean_path.trim_end_matches(['/', '\\']);
+    if clean_path.is_empty() {
+        return Err("Worktree path cannot be empty".to_string());
+    }
+
+    let branch_trimmed = branch.trim();
+    if branch_trimmed.is_empty() {
+        return Err("Worktree branch name cannot be empty".to_string());
+    }
+
+    // If clean_path points to an existing directory that has entries (or is the repo itself),
+    // append the branch name as a subdirectory so Git doesn't fail with 'already exists'.
+    let target_dir = std::path::Path::new(clean_path);
+    let resolved_path = if target_dir.is_dir() {
+        let is_empty = std::fs::read_dir(target_dir)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if !is_empty {
+            let subfolder_name = branch_trimmed.replace(['/', '\\', ':'], "-");
+            target_dir.join(subfolder_name).to_string_lossy().to_string()
+        } else {
+            clean_path.to_string()
+        }
+    } else {
+        clean_path.to_string()
+    };
+
+    let is_new_branch = new_branch.unwrap_or(false);
+    let branch_existed_before = if is_new_branch {
+        let check = create_silent_command(&git_cmd)
+            .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch_trimmed)])
+            .current_dir(&workdir)
+            .output();
+        check.map(|o| o.status.success()).unwrap_or(false)
+    } else {
+        false
+    };
+
     let args = build_worktree_add_args(
-        &path,
-        &branch,
-        new_branch.unwrap_or(false),
+        &resolved_path,
+        branch_trimmed,
+        is_new_branch,
         no_track.unwrap_or(true),
     );
 
@@ -1125,7 +1169,26 @@ pub async fn add_worktree(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git worktree add failed: {stderr}"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let err_msg = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            "Unknown error executing git worktree add".to_string()
+        };
+
+        // If a new branch was requested and did not exist before this call,
+        // but Git created the branch ref before failing the worktree directory setup,
+        // cleanly delete the orphaned branch so the repository is not left in a broken state.
+        if is_new_branch && !branch_existed_before {
+            let _ = create_silent_command(&git_cmd)
+                .args(["branch", "-D", branch_trimmed])
+                .current_dir(&workdir)
+                .output();
+        }
+
+        return Err(format!("git worktree add failed: {err_msg}"));
     }
 
     Ok(())

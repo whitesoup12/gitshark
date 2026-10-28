@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, AlertCircle, FileCode, GitBranch } from "lucide-react";
+import { CheckCircle2, AlertCircle, FileCode, GitBranch, Sparkles } from "lucide-react";
 import { useCodeSharkStore } from "../store/useCodeSharkStore";
 import { normalizePath } from "../utils/language";
 
@@ -12,6 +12,8 @@ export const CodeSharkStatusBar: React.FC = () => {
     isSaving,
     projects,
     projectGitStatus,
+    quietLinting,
+    toggleQuietLinting,
   } = useCodeSharkStore();
 
   const activeTab = openTabs.find((t) => t.path === activeFilePath);
@@ -69,19 +71,39 @@ export const CodeSharkStatusBar: React.FC = () => {
       </div>
 
       {/* Right Details */}
-      {activeTab && (
-        <div className="flex items-center space-x-3 text-shark-400">
-          <span>
-            Ln {cursorPos.line}, Col {cursorPos.col}
-          </span>
-          <span>Spaces: 2</span>
-          <span>UTF-8</span>
-          <span className="capitalize text-cyan-300 font-sans flex items-center space-x-1">
-            <FileCode className="w-3 h-3" />
-            <span>{activeTab.language}</span>
-          </span>
-        </div>
-      )}
+      <div className="flex items-center space-x-3 text-shark-400">
+        {/* Linting mode toggle */}
+        <button
+          onClick={toggleQuietLinting}
+          className={`flex items-center space-x-1 px-1.5 py-0.2 rounded transition-colors text-[10px] font-sans ${
+            quietLinting
+              ? "bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 border border-emerald-800/50"
+              : "bg-cyan-900/60 text-cyan-200 hover:bg-cyan-800/60 border border-cyan-700/50"
+          }`}
+          title={
+            quietLinting
+              ? "Clean Linting active: Missing import squigglies silenced. Click to enable relaxed typechecking."
+              : "Relaxed Linting active: Typechecking enabled (missing module squigglies ignored). Click to toggle."
+          }
+        >
+          <Sparkles className="w-2.5 h-2.5" />
+          <span>{quietLinting ? "Lint: Clean" : "Lint: Relaxed"}</span>
+        </button>
+
+        {activeTab && (
+          <>
+            <span>
+              Ln {cursorPos.line}, Col {cursorPos.col}
+            </span>
+            <span>Spaces: 2</span>
+            <span>UTF-8</span>
+            <span className="capitalize text-cyan-300 font-sans flex items-center space-x-1">
+              <FileCode className="w-3 h-3" />
+              <span>{activeTab.language}</span>
+            </span>
+          </>
+        )}
+      </div>
     </footer>
   );
 };

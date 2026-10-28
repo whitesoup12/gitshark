@@ -8,23 +8,27 @@ export interface LineChange {
  * Returns array of LineChange items for Monaco deltaDecorations.
  */
 export function computeLineDiff(baseText: string, currentText: string): LineChange[] {
-  if (baseText === currentText) {
+  // Normalize Windows CRLF and Unix LF line endings to prevent false positive whole-file diffs
+  const normBase = (baseText ?? "").replace(/\r\n/g, "\n");
+  const normCurrent = (currentText ?? "").replace(/\r\n/g, "\n");
+
+  if (normBase === normCurrent) {
     return [];
   }
 
-  const oldLines = baseText.split("\n");
-  const newLines = currentText.split("\n");
+  const oldLines = normBase.split("\n");
+  const newLines = normCurrent.split("\n");
 
   const n = oldLines.length;
   const m = newLines.length;
 
   // Fast path: if base was empty, all lines are added
-  if (n === 1 && oldLines[0] === "" && currentText.length > 0) {
+  if (n === 1 && oldLines[0] === "" && normCurrent.length > 0) {
     return newLines.map((_, idx) => ({ lineNumber: idx + 1, type: "added" }));
   }
 
   // Fast path: if current is empty, line 1 is marked as deleted
-  if (m === 1 && newLines[0] === "" && baseText.length > 0) {
+  if (m === 1 && newLines[0] === "" && normBase.length > 0) {
     return [{ lineNumber: 1, type: "deleted" }];
   }
 

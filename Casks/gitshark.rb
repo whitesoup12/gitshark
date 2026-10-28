@@ -1,7 +1,7 @@
 cask "gitshark" do
   arch arm: "aarch64", intel: "x64"
 
-  version "2.0.0"
+  version "2.0.1"
   sha256 arm:   "82e165ee41a42fe57333595bf6942f57bafba810fbe27712c7e92523e35fb35b",
          intel: "c911f016c16d6ef1138de9836cb0017c64447ac2767ca2e61ffdb1c045e5c600"
 
@@ -15,7 +15,7 @@ cask "gitshark" do
     strategy :github_latest
   end
 
-  auto_updates true
+  depends_on :macos
 
   app "GitShark.app"
   binary "#{appdir}/GitShark.app/Contents/MacOS/gitshark", target: "gitshark"

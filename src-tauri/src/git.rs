@@ -1683,9 +1683,13 @@ pub struct WorktreeItem {
 
 pub fn parse_worktree_porcelain(stdout: &str) -> Vec<WorktreeItem> {
     let mut worktrees = Vec::new();
-    let blocks = stdout.split("\n\n");
+    let normalized = stdout.replace("\r\n", "\n");
+    let blocks: Vec<&str> = normalized
+        .split("\n\n")
+        .filter(|b| !b.trim().is_empty())
+        .collect();
 
-    for (idx, block) in blocks.enumerate() {
+    for (idx, block) in blocks.into_iter().enumerate() {
         let lines: Vec<&str> = block.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
         if lines.is_empty() {
             continue;
@@ -3051,6 +3055,13 @@ mod tests {
         let sample = "worktree /path/to/main\nHEAD 1111111111111111111111111111111111111111\nbranch refs/heads/main\n\nworktree /path/to/feature\nHEAD 2222222222222222222222222222222222222222\nbranch refs/heads/feature-1\n\nworktree /path/to/detached\nHEAD 3333333333333333333333333333333333333333\ndetached\nlocked maintenance in progress\n";
         let parsed = parse_worktree_porcelain(sample);
         assert_eq!(parsed.len(), 3);
+
+        // Also test Windows CRLF formatted output
+        let crlf_sample = "worktree /path/to/main\r\nHEAD 1111111111111111111111111111111111111111\r\nbranch refs/heads/main\r\n\r\nworktree /path/to/feature\r\nHEAD 2222222222222222222222222222222222222222\r\nbranch refs/heads/feature-1\r\n";
+        let crlf_parsed = parse_worktree_porcelain(crlf_sample);
+        assert_eq!(crlf_parsed.len(), 2);
+        assert!(crlf_parsed[0].is_main);
+        assert!(!crlf_parsed[1].is_main);
         assert!(parsed[0].is_main);
         assert_eq!(parsed[0].branch.as_deref(), Some("main"));
         assert!(!parsed[1].is_main);

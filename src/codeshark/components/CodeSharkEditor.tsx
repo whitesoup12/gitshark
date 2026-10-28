@@ -9,6 +9,52 @@ import { computeLineDiff } from "../utils/diff";
 // Configure Monaco to use locally bundled instance instead of remote CDN
 loader.config({ monaco });
 
+// Configure TypeScript and JavaScript language service in Monaco to silence missing module / import squigglies
+const monacoTs = (monaco.languages as any)?.typescript;
+if (monacoTs) {
+  const codesToIgnore = [
+    2307, // Cannot find module '...' or its corresponding type declarations
+    2304, // Cannot find name '...'
+    2580, // Cannot find name 'require' / 'module' / 'process'
+    2593, // Cannot find name '...' Do you need to install type definitions?
+    7016, // Could not find a declaration file for module '...'
+    2686, // 'React' refers to a UMD global, but the current file is a module
+    2792, // Cannot find module '...'. Did you mean to set the 'moduleResolution' option
+    80001, // File is a CommonJS module; it may be converted to an ES module
+    1375, // 'await' expressions are only allowed at the top level
+    1378,
+  ];
+
+  monacoTs.typescriptDefaults?.setDiagnosticsOptions({
+    noSemanticValidation: true, // Default to clean syntax-only linting to eliminate missing import squigglies
+    noSyntaxValidation: false,
+    diagnosticCodesToIgnore: codesToIgnore,
+  });
+
+  monacoTs.javascriptDefaults?.setDiagnosticsOptions({
+    noSemanticValidation: true,
+    noSyntaxValidation: false,
+    diagnosticCodesToIgnore: codesToIgnore,
+  });
+
+  const compilerOpts = {
+    target: monacoTs.ScriptTarget?.ESNext ?? 99,
+    allowNonTextExtensions: true,
+    moduleResolution: monacoTs.ModuleResolutionKind?.NodeJs ?? 2,
+    module: monacoTs.ModuleKind?.ESNext ?? 99,
+    noEmit: true,
+    esModuleInterop: true,
+    jsx: monacoTs.JsxEmit?.ReactJSX ?? 4,
+    reactNamespace: "React",
+    allowJs: true,
+    checkJs: false,
+    skipLibCheck: true,
+  };
+
+  monacoTs.typescriptDefaults?.setCompilerOptions(compilerOpts);
+  monacoTs.javascriptDefaults?.setCompilerOptions(compilerOpts);
+}
+
 export const CodeSharkEditor: React.FC = () => {
   const {
     openTabs,
@@ -18,7 +64,26 @@ export const CodeSharkEditor: React.FC = () => {
     setCursorPos,
     addProjectFolder,
     openTarget,
+    quietLinting,
   } = useCodeSharkStore();
+
+  // Dynamically update diagnostic options when quietLinting toggle changes
+  useEffect(() => {
+    const ts = (monaco.languages as any)?.typescript;
+    if (ts) {
+      const codesToIgnore = [2307, 2304, 2580, 2593, 7016, 2686, 2792, 80001, 1375, 1378];
+      ts.typescriptDefaults?.setDiagnosticsOptions({
+        noSemanticValidation: quietLinting,
+        noSyntaxValidation: false,
+        diagnosticCodesToIgnore: codesToIgnore,
+      });
+      ts.javascriptDefaults?.setDiagnosticsOptions({
+        noSemanticValidation: quietLinting,
+        noSyntaxValidation: false,
+        diagnosticCodesToIgnore: codesToIgnore,
+      });
+    }
+  }, [quietLinting]);
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<string[]>([]);
