@@ -1,8 +1,8 @@
 cask "gitshark-local" do
-  version "2.0.1"
+  version "2.0.2"
   sha256 "ba76c11818eacea199aad03bd498c123e003bef9b22ef52808049874bfb9b7e5"
 
-  url "file://#{File.expand_path('../../dist-release/GitShark_2.0.1_aarch64.dmg', __dir__)}"
+  url "file://#{File.expand_path('../../dist-release/GitShark_2.0.2_aarch64.dmg', __dir__)}"
   name "GitShark (Local Build)"
   desc "Blazingly fast, modern Git desktop client built with Tauri v2 and Rust"
   homepage "https://github.com/whitesoup12/gitshark"

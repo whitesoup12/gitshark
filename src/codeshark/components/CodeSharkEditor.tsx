@@ -26,14 +26,14 @@ if (monacoTs) {
   ];
 
   monacoTs.typescriptDefaults?.setDiagnosticsOptions({
-    noSemanticValidation: true, // Default to clean syntax-only linting to eliminate missing import squigglies
-    noSyntaxValidation: false,
+    noSemanticValidation: true, // Clean linting by default: disable semantic squigglies
+    noSyntaxValidation: true, // Clean linting by default: disable syntax squigglies
     diagnosticCodesToIgnore: codesToIgnore,
   });
 
   monacoTs.javascriptDefaults?.setDiagnosticsOptions({
     noSemanticValidation: true,
-    noSyntaxValidation: false,
+    noSyntaxValidation: true,
     diagnosticCodesToIgnore: codesToIgnore,
   });
 
@@ -55,6 +55,22 @@ if (monacoTs) {
   monacoTs.javascriptDefaults?.setCompilerOptions(compilerOpts);
 }
 
+// Silence diagnostics in JSON and CSS language services by default
+const monacoJson = (monaco.languages as any)?.json;
+if (monacoJson) {
+  monacoJson.jsonDefaults?.setDiagnosticsOptions({
+    validate: false,
+    allowComments: true,
+  });
+}
+
+const monacoCss = (monaco.languages as any)?.css;
+if (monacoCss) {
+  monacoCss.cssDefaults?.setDiagnosticsOptions({
+    validate: false,
+  });
+}
+
 export const CodeSharkEditor: React.FC = () => {
   const {
     openTabs,
@@ -67,26 +83,61 @@ export const CodeSharkEditor: React.FC = () => {
     quietLinting,
   } = useCodeSharkStore();
 
-  // Dynamically update diagnostic options when quietLinting toggle changes
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const decorationsRef = useRef<string[]>([]);
+
+  // Dynamically update diagnostic options and validation decorations when quietLinting changes
   useEffect(() => {
+    if (editorRef.current) {
+      editorRef.current.updateOptions({
+        renderValidationDecorations: quietLinting ? "off" : "on",
+      });
+    }
+
     const ts = (monaco.languages as any)?.typescript;
     if (ts) {
       const codesToIgnore = [2307, 2304, 2580, 2593, 7016, 2686, 2792, 80001, 1375, 1378];
       ts.typescriptDefaults?.setDiagnosticsOptions({
         noSemanticValidation: quietLinting,
-        noSyntaxValidation: false,
+        noSyntaxValidation: quietLinting,
         diagnosticCodesToIgnore: codesToIgnore,
       });
       ts.javascriptDefaults?.setDiagnosticsOptions({
         noSemanticValidation: quietLinting,
-        noSyntaxValidation: false,
+        noSyntaxValidation: quietLinting,
         diagnosticCodesToIgnore: codesToIgnore,
       });
     }
-  }, [quietLinting]);
 
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const decorationsRef = useRef<string[]>([]);
+    const json = (monaco.languages as any)?.json;
+    if (json) {
+      json.jsonDefaults?.setDiagnosticsOptions({
+        validate: !quietLinting,
+        allowComments: true,
+      });
+    }
+
+    const css = (monaco.languages as any)?.css;
+    if (css) {
+      css.cssDefaults?.setDiagnosticsOptions({
+        validate: !quietLinting,
+      });
+    }
+
+    if (quietLinting) {
+      try {
+        monaco.editor.getModels().forEach((model) => {
+          monaco.editor.setModelMarkers(model, "typescript", []);
+          monaco.editor.setModelMarkers(model, "javascript", []);
+          monaco.editor.setModelMarkers(model, "json", []);
+          monaco.editor.setModelMarkers(model, "css", []);
+          monaco.editor.setModelMarkers(model, "html", []);
+        });
+      } catch (err) {
+        console.warn("Could not clear Monaco markers:", err);
+      }
+    }
+  }, [quietLinting]);
 
   const activeTab = openTabs.find((t) => t.path === activeFilePath);
 
@@ -132,6 +183,22 @@ export const CodeSharkEditor: React.FC = () => {
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
+
+    // Ensure validation decorations strictly match quietLinting state
+    editor.updateOptions({
+      renderValidationDecorations: quietLinting ? "off" : "on",
+    });
+
+    if (quietLinting) {
+      const model = editor.getModel();
+      if (model) {
+        monacoInstance.editor.setModelMarkers(model, "typescript", []);
+        monacoInstance.editor.setModelMarkers(model, "javascript", []);
+        monacoInstance.editor.setModelMarkers(model, "json", []);
+        monacoInstance.editor.setModelMarkers(model, "css", []);
+        monacoInstance.editor.setModelMarkers(model, "html", []);
+      }
+    }
 
     // Track cursor position
     editor.onDidChangeCursorPosition((e) => {
@@ -238,6 +305,7 @@ export const CodeSharkEditor: React.FC = () => {
           cursorBlinking: "smooth",
           smoothScrolling: true,
           contextmenu: true,
+          renderValidationDecorations: quietLinting ? "off" : "on",
         }}
         loading={
           <div className="flex items-center justify-center h-full text-xs text-shark-400 bg-shark-950">

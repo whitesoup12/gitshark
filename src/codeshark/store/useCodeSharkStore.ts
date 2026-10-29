@@ -10,6 +10,20 @@ import {
 } from "@/lib/ipc";
 import { detectLanguageByFilename, normalizePath } from "../utils/language";
 
+const STORAGE_QUIET_LINTING = "codeshark_quiet_linting";
+
+const getInitialQuietLinting = (): boolean => {
+  try {
+    const saved = localStorage.getItem(STORAGE_QUIET_LINTING);
+    if (saved !== null) {
+      return saved === "true";
+    }
+  } catch {
+    // ignore
+  }
+  return true; // Default to true: clean syntax without squigglies/linting
+};
+
 interface CodeSharkState {
   projects: ProjectRoot[];
   expandedFolders: Record<string, boolean>;
@@ -312,12 +326,17 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
     }
   },
 
-  quietLinting: true,
+  quietLinting: getInitialQuietLinting(),
   toggleQuietLinting: () => {
     const next = !get().quietLinting;
+    try {
+      localStorage.setItem(STORAGE_QUIET_LINTING, String(next));
+    } catch {
+      // ignore
+    }
     set({
       quietLinting: next,
-      statusMessage: next ? "Linting: Syntax Only (No squigglies)" : "Linting: Relaxed (Ignoring missing imports)",
+      statusMessage: next ? "Linting: Clean (All squigglies disabled)" : "Linting: Active",
     });
     setTimeout(() => {
       set({ statusMessage: null });

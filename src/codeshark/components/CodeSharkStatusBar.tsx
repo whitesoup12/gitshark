@@ -82,12 +82,12 @@ export const CodeSharkStatusBar: React.FC = () => {
           }`}
           title={
             quietLinting
-              ? "Clean Linting active: Missing import squigglies silenced. Click to enable relaxed typechecking."
-              : "Relaxed Linting active: Typechecking enabled (missing module squigglies ignored). Click to toggle."
+              ? "Linting Clean: All squigglies and linting lines are removed. Click to enable linting."
+              : "Linting Active: Diagnostics and squigglies enabled. Click to silence."
           }
         >
           <Sparkles className="w-2.5 h-2.5" />
-          <span>{quietLinting ? "Lint: Clean" : "Lint: Relaxed"}</span>
+          <span>{quietLinting ? "Lint: Clean" : "Lint: Active"}</span>
         </button>
 
         {activeTab && (
