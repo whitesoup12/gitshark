@@ -1,10 +1,15 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import Editor, { type OnMount, loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import { Code, FolderPlus, FilePlus } from "lucide-react";
 import { useCodeSharkStore } from "../store/useCodeSharkStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
+import { registerMonacoThemes, THEMES } from "@/lib/theme";
 import { pickDirectory, pickFile } from "@/lib/ipc";
 import { computeLineDiff } from "../utils/diff";
+import { normalizePath } from "../utils/language";
+import { CodeSharkFindReplaceBar } from "./CodeSharkFindReplaceBar";
+import { CodeSharkEditorContextMenu } from "./CodeSharkEditorContextMenu";
 
 // Configure Monaco to use locally bundled instance instead of remote CDN
 loader.config({ monaco });
@@ -13,21 +18,12 @@ loader.config({ monaco });
 const monacoTs = (monaco.languages as any)?.typescript;
 if (monacoTs) {
   const codesToIgnore = [
-    2307, // Cannot find module '...' or its corresponding type declarations
-    2304, // Cannot find name '...'
-    2580, // Cannot find name 'require' / 'module' / 'process'
-    2593, // Cannot find name '...' Do you need to install type definitions?
-    7016, // Could not find a declaration file for module '...'
-    2686, // 'React' refers to a UMD global, but the current file is a module
-    2792, // Cannot find module '...'. Did you mean to set the 'moduleResolution' option
-    80001, // File is a CommonJS module; it may be converted to an ES module
-    1375, // 'await' expressions are only allowed at the top level
-    1378,
+    2307, 2304, 2580, 2593, 7016, 2686, 2792, 80001, 1375, 1378,
   ];
 
   monacoTs.typescriptDefaults?.setDiagnosticsOptions({
-    noSemanticValidation: true, // Clean linting by default: disable semantic squigglies
-    noSyntaxValidation: true, // Clean linting by default: disable syntax squigglies
+    noSemanticValidation: true,
+    noSyntaxValidation: true,
     diagnosticCodesToIgnore: codesToIgnore,
   });
 
@@ -55,7 +51,6 @@ if (monacoTs) {
   monacoTs.javascriptDefaults?.setCompilerOptions(compilerOpts);
 }
 
-// Silence diagnostics in JSON and CSS language services by default
 const monacoJson = (monaco.languages as any)?.json;
 if (monacoJson) {
   monacoJson.jsonDefaults?.setDiagnosticsOptions({
@@ -81,12 +76,32 @@ export const CodeSharkEditor: React.FC = () => {
     addProjectFolder,
     openTarget,
     quietLinting,
+    jumpToLocation,
+    openInFileFind,
+    setSidebarTab,
+    setSearchQuery,
+    executeGlobalSearch,
+    openQuickOpen,
   } = useCodeSharkStore();
+
+  const { currentTheme } = useSettingsStore();
+  const activeThemeDef = THEMES.find((t) => t.id === currentTheme) || THEMES[0];
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const decorationsRef = useRef<string[]>([]);
+  const [editorContextMenu, setEditorContextMenu] = useState<{ x: number; y: number } | null>(null);
 
-  // Dynamically update diagnostic options and validation decorations when quietLinting changes
+  // Sync theme changes with Monaco
+  useEffect(() => {
+    try {
+      registerMonacoThemes(monaco);
+      monaco.editor.setTheme(activeThemeDef.monacoTheme);
+    } catch {
+      // editor not mounted yet
+    }
+  }, [activeThemeDef.monacoTheme]);
+
+  // Dynamically update diagnostic options when quietLinting changes
   useEffect(() => {
     if (editorRef.current) {
       editorRef.current.updateOptions({
@@ -176,15 +191,55 @@ export const CodeSharkEditor: React.FC = () => {
     );
   }, [activeTab?.content, activeTab?.gitHeadContent, activeTab?.originalContent]);
 
-  // Synchronize decorations when tab content, git head, or active tab changes
   useEffect(() => {
     updateDecorations();
   }, [updateDecorations, activeTab?.path]);
 
+  // Jump to location navigation from global search
+  useEffect(() => {
+    if (!jumpToLocation || !editorRef.current || !activeTab) return;
+
+    const normJump = normalizePath(jumpToLocation.filePath);
+    const normActive = normalizePath(activeTab.path);
+
+    if (normJump === normActive) {
+      const editor = editorRef.current;
+      const line = jumpToLocation.line;
+      const startCol = jumpToLocation.col ?? 1;
+      const endCol = jumpToLocation.endCol ?? startCol;
+
+      editor.setPosition({ lineNumber: line, column: startCol });
+      const range = new monaco.Range(line, startCol, line, endCol);
+      editor.setSelection(range);
+      editor.revealRangeInCenter(range, monaco.editor.ScrollType.Smooth);
+      editor.focus();
+
+      // Temporary pulse decoration
+      const flashDecorations = editor.deltaDecorations([], [
+        {
+          range,
+          options: {
+            isWholeLine: false,
+            className: "bg-cyan-400/50 border border-cyan-300 font-semibold",
+          },
+        },
+      ]);
+
+      setTimeout(() => {
+        if (editorRef.current) {
+          editorRef.current.deltaDecorations(flashDecorations, []);
+        }
+      }, 1500);
+    }
+  }, [jumpToLocation, activeTab?.path]);
+
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
 
-    // Ensure validation decorations strictly match quietLinting state
+    // Register all custom CodeShark themes and apply current theme
+    registerMonacoThemes(monacoInstance);
+    monacoInstance.editor.setTheme(activeThemeDef.monacoTheme);
+
     editor.updateOptions({
       renderValidationDecorations: quietLinting ? "off" : "on",
     });
@@ -200,17 +255,63 @@ export const CodeSharkEditor: React.FC = () => {
       }
     }
 
-    // Track cursor position
+    // Cursor position tracking
     editor.onDidChangeCursorPosition((e) => {
       setCursorPos(e.position.lineNumber, e.position.column);
     });
 
-    // Custom Ctrl+S / Cmd+S keybinding directly in Monaco
+    // Custom Right-Click Context Menu interceptor
+    editor.onContextMenu((e) => {
+      e.event.preventDefault();
+      e.event.stopPropagation();
+      setEditorContextMenu({
+        x: e.event.posx,
+        y: e.event.posy,
+      });
+    });
+
+    // Keyboard Shortcuts inside Monaco
+    // Save: Ctrl+S / Cmd+S
     editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS, () => {
       saveFile();
     });
 
-    // Initial render of line decorations
+    // Find in file: Ctrl+F / Cmd+F
+    editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyF, () => {
+      const selection = editor.getSelection();
+      const model = editor.getModel();
+      const text = selection && model && !selection.isEmpty() ? model.getValueInRange(selection) : "";
+      openInFileFind(false, text || undefined);
+    });
+
+    // Replace in file: Ctrl+H / Cmd+H
+    editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyH, () => {
+      const selection = editor.getSelection();
+      const model = editor.getModel();
+      const text = selection && model && !selection.isEmpty() ? model.getValueInRange(selection) : "";
+      openInFileFind(true, text || undefined);
+    });
+
+    // Find in Files / Global Search: Ctrl+Shift+F / Cmd+Shift+F
+    editor.addCommand(
+      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyMod.Shift | monacoInstance.KeyCode.KeyF,
+      () => {
+        const selection = editor.getSelection();
+        const model = editor.getModel();
+        const text = selection && model && !selection.isEmpty() ? model.getValueInRange(selection) : "";
+        setSidebarTab("search");
+        if (text) {
+          setSearchQuery(text);
+          setTimeout(executeGlobalSearch, 50);
+        }
+      }
+    );
+
+    // Quick Open Files: Ctrl+P / Cmd+P
+    editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyP, () => {
+      openQuickOpen();
+    });
+
     setTimeout(updateDecorations, 50);
   };
 
@@ -262,15 +363,33 @@ export const CodeSharkEditor: React.FC = () => {
           <div className="pt-6 border-t border-shark-800/80 w-full text-xs text-shark-400 space-y-2">
             <div className="flex justify-between items-center text-[11px]">
               <span className="text-shark-400">Save File</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">Ctrl + S</kbd>
+              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">
+                Ctrl + S
+              </kbd>
             </div>
             <div className="flex justify-between items-center text-[11px]">
-              <span className="text-shark-400">Close Tab</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">Ctrl + W</kbd>
+              <span className="text-shark-400">Find in File / Replace</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">
+                Ctrl + F / Ctrl + H
+              </kbd>
+            </div>
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-shark-400">Global Workspace Search</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">
+                Ctrl + Shift + F
+              </kbd>
+            </div>
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-shark-400">Quick Open File</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">
+                Ctrl + P
+              </kbd>
             </div>
             <div className="flex justify-between items-center text-[11px]">
               <span className="text-shark-400">Toggle Explorer</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">Ctrl + B</kbd>
+              <kbd className="px-1.5 py-0.5 rounded bg-shark-900 border border-shark-700 text-shark-300 font-mono">
+                Ctrl + B
+              </kbd>
             </div>
           </div>
         </div>
@@ -280,6 +399,9 @@ export const CodeSharkEditor: React.FC = () => {
 
   return (
     <div className="flex-1 w-full h-full relative overflow-hidden bg-shark-950">
+      {/* Floating In-File Find and Replace Bar */}
+      <CodeSharkFindReplaceBar editor={editorRef.current} />
+
       <Editor
         key={activeTab.path}
         path={activeTab.path}
@@ -287,7 +409,7 @@ export const CodeSharkEditor: React.FC = () => {
         value={activeTab.content}
         onChange={(value) => updateFileContent(activeTab.path, value ?? "")}
         onMount={handleEditorMount}
-        theme="vs-dark"
+        theme={activeThemeDef.monacoTheme}
         options={{
           minimap: { enabled: true },
           fontSize: 13.5,
@@ -304,7 +426,7 @@ export const CodeSharkEditor: React.FC = () => {
           padding: { top: 10, bottom: 10 },
           cursorBlinking: "smooth",
           smoothScrolling: true,
-          contextmenu: true,
+          contextmenu: false, // Handled by our custom CodeSharkEditorContextMenu
           renderValidationDecorations: quietLinting ? "off" : "on",
         }}
         loading={
@@ -313,6 +435,17 @@ export const CodeSharkEditor: React.FC = () => {
           </div>
         }
       />
+
+      {/* Editor Content Right-Click Context Menu */}
+      {editorContextMenu && activeTab && (
+        <CodeSharkEditorContextMenu
+          x={editorContextMenu.x}
+          y={editorContextMenu.y}
+          editor={editorRef.current}
+          activeFilePath={activeTab.path}
+          onClose={() => setEditorContextMenu(null)}
+        />
+      )}
     </div>
   );
 };

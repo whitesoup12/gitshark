@@ -79,13 +79,13 @@ export const CodeSharkTabs: React.FC = () => {
 
           return (
             <div
-              key={tab.path}
+              key={tab.id || tab.path}
               onClick={() => openFile(tab.path, tab.name, tab.projectId)}
               onMouseDown={(e) => {
                 if (e.button === 1) {
                   // Middle click closes tab
                   e.preventDefault();
-                  closeTab(tab.path);
+                  closeTab(tab.id || tab.path);
                 }
               }}
               onContextMenu={(e) => {
@@ -159,7 +159,7 @@ export const CodeSharkTabs: React.FC = () => {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    closeTab(tab.path);
+                    closeTab(tab.id || tab.path);
                   }}
                   title="Close Tab (Ctrl+W)"
                   className={`p-0.5 rounded hover:bg-shark-700/60 text-shark-400 hover:text-white transition-opacity ${
@@ -200,7 +200,7 @@ export const CodeSharkTabs: React.FC = () => {
           {/* Close */}
           <button
             onClick={() => {
-              closeTab(contextMenu.tab.path);
+              closeTab(contextMenu.tab.id || contextMenu.tab.path);
               setContextMenu(null);
             }}
             className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-shark-850 text-left transition-colors"
@@ -215,7 +215,7 @@ export const CodeSharkTabs: React.FC = () => {
           {/* Close Others */}
           <button
             onClick={() => {
-              closeOtherTabs(contextMenu.tab.path);
+              closeOtherTabs(contextMenu.tab.id || contextMenu.tab.path);
               setContextMenu(null);
             }}
             disabled={openTabs.length <= 1}
@@ -228,10 +228,13 @@ export const CodeSharkTabs: React.FC = () => {
           {/* Close to the Right */}
           <button
             onClick={() => {
-              closeTabsToTheRight(contextMenu.tab.path);
+              closeTabsToTheRight(contextMenu.tab.id || contextMenu.tab.path);
               setContextMenu(null);
             }}
-            disabled={openTabs[openTabs.length - 1].path === contextMenu.tab.path}
+            disabled={
+              openTabs[openTabs.length - 1].id === contextMenu.tab.id ||
+              openTabs[openTabs.length - 1].path === contextMenu.tab.path
+            }
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-shark-850 disabled:opacity-40 disabled:hover:bg-transparent text-left transition-colors"
           >
             <ArrowRightToLine className="w-3.5 h-3.5 text-shark-400" />

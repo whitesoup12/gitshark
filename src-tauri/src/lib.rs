@@ -126,6 +126,14 @@ pub fn run() {
             commands::write_text_file,
             commands::get_repo_git_status,
             commands::get_file_git_head_content,
+            commands::create_codeshark_file,
+            commands::create_codeshark_dir,
+            commands::rename_codeshark_path,
+            commands::delete_codeshark_path,
+            commands::reveal_in_file_manager,
+            commands::search_workspace_content,
+            commands::replace_workspace_content,
+            commands::search_workspace_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running gitshark desktop application");

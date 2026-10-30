@@ -2870,6 +2870,535 @@ pub async fn get_file_git_head_content(
     }
 }
 
+
+#[tauri::command]
+pub fn create_codeshark_file(file_path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&file_path);
+    if p.exists() {
+        return Err(format!("File '{}' already exists", file_path));
+    }
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create parent directories: {e}"))?;
+        }
+    }
+    std::fs::File::create(p)
+        .map_err(|e| format!("Failed to create file: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_codeshark_dir(dir_path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&dir_path);
+    if p.exists() {
+        return Err(format!("Directory '{}' already exists", dir_path));
+    }
+    std::fs::create_dir_all(p)
+        .map_err(|e| format!("Failed to create directory: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_codeshark_path(old_path: String, new_path: String) -> Result<(), String> {
+    let old_p = std::path::Path::new(&old_path);
+    let new_p = std::path::Path::new(&new_path);
+    if !old_p.exists() {
+        return Err(format!("Path '{}' does not exist", old_path));
+    }
+    if new_p.exists() && old_path.to_lowercase() != new_path.to_lowercase() {
+        return Err(format!("Target path '{}' already exists", new_path));
+    }
+    if let Some(parent) = new_p.parent() {
+        if !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    std::fs::rename(old_p, new_p)
+        .map_err(|e| format!("Failed to rename '{}' to '{}': {e}", old_path, new_path))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_codeshark_path(target_path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&target_path);
+    if !p.exists() {
+        return Ok(());
+    }
+    if p.is_dir() {
+        std::fs::remove_dir_all(p)
+            .map_err(|e| format!("Failed to delete directory '{}': {e}", target_path))?;
+    } else {
+        std::fs::remove_file(p)
+            .map_err(|e| format!("Failed to delete file '{}': {e}", target_path))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reveal_in_file_manager(target_path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&target_path);
+    if !p.exists() {
+        return Err(format!("Path '{}' does not exist", target_path));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let win_path = p.to_string_lossy().replace('/', "\\");
+        let arg = format!("/select,{}", win_path);
+        let _ = std::process::Command::new("explorer")
+            .arg(arg)
+            .spawn()
+            .map_err(|e| format!("Failed to launch Explorer: {e}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .args(["-R", &target_path])
+            .spawn()
+            .map_err(|e| format!("Failed to launch Finder: {e}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let parent = if p.is_dir() { p } else { p.parent().unwrap_or(p) };
+        let _ = std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|e| format!("Failed to launch file manager: {e}"))?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceContentMatch {
+    pub file_path: String,
+    pub file_name: String,
+    pub relative_path: String,
+    pub line_number: usize,
+    pub line_content: String,
+    pub match_start: usize,
+    pub match_end: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchWorkspaceContentOptions {
+    pub root_paths: Vec<String>,
+    pub query: String,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub is_regex: bool,
+    pub include_pattern: Option<String>,
+    pub exclude_pattern: Option<String>,
+    pub max_results: Option<usize>,
+}
+
+fn matches_filter_pattern(path_str: &str, file_name: &str, pattern: &str) -> bool {
+    let parts: Vec<&str> = pattern.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return true;
+    }
+    let lower_path = path_str.to_lowercase();
+    let lower_name = file_name.to_lowercase();
+
+    for pat in parts {
+        let pat_clean = pat.trim_start_matches('*').to_lowercase();
+        if pat.starts_with('*') && pat.ends_with('*') {
+            let mid = &pat[1..pat.len() - 1].to_lowercase();
+            if lower_path.contains(mid) {
+                return true;
+            }
+        } else if pat.starts_with('*') {
+            if lower_name.ends_with(&pat_clean) {
+                return true;
+            }
+        } else if lower_path.contains(&pat.to_lowercase()) {
+            return true;
+        }
+    }
+    false
+}
+
+fn build_search_regex(
+    query: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+    is_regex: bool,
+) -> Result<regex::Regex, String> {
+    let base_pattern = if is_regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
+
+    let patterned = if whole_word {
+        format!(r"\b{}\b", base_pattern)
+    } else {
+        base_pattern
+    };
+
+    regex::RegexBuilder::new(&patterned)
+        .case_insensitive(!case_sensitive)
+        .multi_line(false)
+        .build()
+        .map_err(|e| format!("Invalid search pattern: {e}"))
+}
+
+#[tauri::command]
+pub fn search_workspace_content(
+    options: SearchWorkspaceContentOptions,
+) -> Result<Vec<WorkspaceContentMatch>, String> {
+    if options.query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let re = build_search_regex(
+        &options.query,
+        options.case_sensitive,
+        options.whole_word,
+        options.is_regex,
+    )?;
+    let max = options.max_results.unwrap_or(1000);
+    let mut matches = Vec::new();
+
+    for root_str in &options.root_paths {
+        if matches.len() >= max {
+            break;
+        }
+
+        let root_path = std::path::Path::new(root_str);
+        if !root_path.exists() {
+            continue;
+        }
+
+        for entry in walkdir::WalkDir::new(root_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                if e.file_type().is_dir() {
+                    !name.starts_with(".git")
+                        && name != "node_modules"
+                        && name != "target"
+                        && name != "dist"
+                        && name != "build"
+                        && name != ".next"
+                        && name != ".turbo"
+                        && name != ".cache"
+                        && name != ".vscode"
+                        && name != ".idea"
+                } else {
+                    true
+                }
+            })
+            .flatten()
+        {
+            if matches.len() >= max {
+                break;
+            }
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let file_path = entry.path();
+            if let Ok(meta) = entry.metadata() {
+                if meta.len() > 5 * 1024 * 1024 {
+                    continue;
+                }
+            }
+
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let full_path_str = file_path
+                .to_string_lossy()
+                .to_string()
+                .replace(r"\\?\", "")
+                .replace('\\', "/");
+
+            if let Some(ref incl) = options.include_pattern {
+                if !incl.trim().is_empty() && !matches_filter_pattern(&full_path_str, &file_name, incl) {
+                    continue;
+                }
+            }
+            if let Some(ref excl) = options.exclude_pattern {
+                if !excl.trim().is_empty() && matches_filter_pattern(&full_path_str, &file_name, excl) {
+                    continue;
+                }
+            }
+
+            let Ok(bytes) = std::fs::read(file_path) else {
+                continue;
+            };
+            if bytes.iter().take(4096).any(|&b| b == 0) {
+                continue;
+            }
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
+
+            let rel_path = file_path
+                .strip_prefix(root_path)
+                .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
+                .unwrap_or_else(|_| file_name.clone());
+
+            for (idx, line) in text.lines().enumerate() {
+                if matches.len() >= max {
+                    break;
+                }
+                for m in re.find_iter(line) {
+                    let line_content = if line.len() > 400 {
+                        let start = m.start().saturating_sub(60);
+                        let end = (m.end() + 60).min(line.len());
+                        format!("...{}...", &line[start..end])
+                    } else {
+                        line.to_string()
+                    };
+
+                    matches.push(WorkspaceContentMatch {
+                        file_path: full_path_str.clone(),
+                        file_name: file_name.clone(),
+                        relative_path: rel_path.clone(),
+                        line_number: idx + 1,
+                        line_content,
+                        match_start: m.start(),
+                        match_end: m.end(),
+                    });
+
+                    if matches.len() >= max {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(matches)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceReplaceOptions {
+    pub root_paths: Vec<String>,
+    pub query: String,
+    pub replacement: String,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub is_regex: bool,
+    pub include_pattern: Option<String>,
+    pub exclude_pattern: Option<String>,
+    pub target_files: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceReplaceSummary {
+    pub files_modified: usize,
+    pub occurrences_replaced: usize,
+    pub modified_files: Vec<String>,
+}
+
+#[tauri::command]
+pub fn replace_workspace_content(
+    options: WorkspaceReplaceOptions,
+) -> Result<WorkspaceReplaceSummary, String> {
+    if options.query.is_empty() {
+        return Ok(WorkspaceReplaceSummary {
+            files_modified: 0,
+            occurrences_replaced: 0,
+            modified_files: Vec::new(),
+        });
+    }
+
+    let re = build_search_regex(
+        &options.query,
+        options.case_sensitive,
+        options.whole_word,
+        options.is_regex,
+    )?;
+
+    let mut candidate_files: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Some(ref targets) = options.target_files {
+        for t in targets {
+            candidate_files.push(std::path::PathBuf::from(t));
+        }
+    } else {
+        for root_str in &options.root_paths {
+            let root_path = std::path::Path::new(root_str);
+            if !root_path.exists() {
+                continue;
+            }
+
+            for entry in walkdir::WalkDir::new(root_path)
+                .follow_links(false)
+                .into_iter()
+                .filter_entry(|e| {
+                    let name = e.file_name().to_string_lossy();
+                    if e.file_type().is_dir() {
+                        !name.starts_with(".git")
+                            && name != "node_modules"
+                            && name != "target"
+                            && name != "dist"
+                            && name != "build"
+                    } else {
+                        true
+                    }
+                })
+                .flatten()
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                let full_str = entry.path().to_string_lossy().to_string().replace('\\', "/");
+
+                if let Some(ref incl) = options.include_pattern {
+                    if !incl.trim().is_empty() && !matches_filter_pattern(&full_str, &file_name, incl) {
+                        continue;
+                    }
+                }
+                if let Some(ref excl) = options.exclude_pattern {
+                    if !excl.trim().is_empty() && matches_filter_pattern(&full_str, &file_name, excl) {
+                        continue;
+                    }
+                }
+                candidate_files.push(entry.into_path());
+            }
+        }
+    }
+
+    let mut files_modified = 0;
+    let mut occurrences_replaced = 0;
+    let mut modified_files = Vec::new();
+
+    for file_path in candidate_files {
+        if !file_path.is_file() {
+            continue;
+        }
+        if let Ok(meta) = file_path.metadata() {
+            if meta.len() > 10 * 1024 * 1024 {
+                continue;
+            }
+        }
+
+        let Ok(bytes) = std::fs::read(&file_path) else {
+            continue;
+        };
+        if bytes.iter().take(4096).any(|&b| b == 0) {
+            continue;
+        }
+        let Ok(content) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+
+        let count = re.find_iter(content).count();
+        if count > 0 {
+            let replaced = re.replace_all(content, options.replacement.as_str());
+            if std::fs::write(&file_path, replaced.as_bytes()).is_ok() {
+                files_modified += 1;
+                occurrences_replaced += count;
+                let norm = file_path
+                    .to_string_lossy()
+                    .to_string()
+                    .replace(r"\\?\", "")
+                    .replace('\\', "/");
+                modified_files.push(norm);
+            }
+        }
+    }
+
+    Ok(WorkspaceReplaceSummary {
+        files_modified,
+        occurrences_replaced,
+        modified_files,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceFileMatch {
+    pub path: String,
+    pub name: String,
+    pub relative_path: String,
+    pub is_dir: bool,
+}
+
+#[tauri::command]
+pub fn search_workspace_files(
+    root_paths: Vec<String>,
+    query: String,
+    max_results: Option<usize>,
+) -> Result<Vec<WorkspaceFileMatch>, String> {
+    let max = max_results.unwrap_or(200);
+    let mut results = Vec::new();
+    let query_lower = query.trim().to_lowercase();
+
+    for root_str in &root_paths {
+        if results.len() >= max {
+            break;
+        }
+        let root_path = std::path::Path::new(root_str);
+        if !root_path.exists() {
+            continue;
+        }
+
+        for entry in walkdir::WalkDir::new(root_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                if e.file_type().is_dir() {
+                    !name.starts_with(".git")
+                        && name != "node_modules"
+                        && name != "target"
+                        && name != "dist"
+                        && name != "build"
+                } else {
+                    true
+                }
+            })
+            .flatten()
+        {
+            if results.len() >= max {
+                break;
+            }
+            if entry.depth() == 0 {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path_norm = entry
+                .path()
+                .to_string_lossy()
+                .to_string()
+                .replace(r"\\?\", "")
+                .replace('\\', "/");
+            let rel_path = entry
+                .path()
+                .strip_prefix(root_path)
+                .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
+                .unwrap_or_else(|_| name.clone());
+
+            let name_lower = name.to_lowercase();
+            let rel_lower = rel_path.to_lowercase();
+
+            if query_lower.is_empty() || name_lower.contains(&query_lower) || rel_lower.contains(&query_lower) {
+                results.push(WorkspaceFileMatch {
+                    path: path_norm,
+                    name,
+                    relative_path: rel_path,
+                    is_dir: entry.file_type().is_dir(),
+                });
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3027,5 +3556,91 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&test_dir);
     }
-}
 
+    #[test]
+    fn test_codeshark_fs_operations() {
+        let test_dir = std::env::temp_dir().join(format!("codeshark_fs_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+
+        let sub_dir = test_dir.join("subdir");
+        assert!(create_codeshark_dir(sub_dir.to_string_lossy().to_string()).is_ok());
+
+        let new_file = sub_dir.join("test.txt");
+        assert!(create_codeshark_file(new_file.to_string_lossy().to_string()).is_ok());
+        assert!(new_file.exists());
+
+        let renamed_file = sub_dir.join("renamed.txt");
+        assert!(rename_codeshark_path(
+            new_file.to_string_lossy().to_string(),
+            renamed_file.to_string_lossy().to_string(),
+        ).is_ok());
+        assert!(!new_file.exists());
+        assert!(renamed_file.exists());
+
+        assert!(delete_codeshark_path(renamed_file.to_string_lossy().to_string()).is_ok());
+        assert!(!renamed_file.exists());
+
+        assert!(delete_codeshark_path(sub_dir.to_string_lossy().to_string()).is_ok());
+        assert!(!sub_dir.exists());
+
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_codeshark_search_and_replace() {
+        let test_dir = std::env::temp_dir().join(format!("codeshark_search_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&test_dir);
+
+        let file1 = test_dir.join("alpha.ts");
+        let file2 = test_dir.join("beta.rs");
+        std::fs::write(&file1, "const sharkName = 'GreatWhite';\nconsole.log(sharkName);\n").unwrap();
+        std::fs::write(&file2, "fn shark_bite() {\n    let sharkName = \"Hammerhead\";\n}\n").unwrap();
+
+        let search_opts = SearchWorkspaceContentOptions {
+            root_paths: vec![test_dir.to_string_lossy().to_string()],
+            query: "sharkName".to_string(),
+            case_sensitive: true,
+            whole_word: true,
+            is_regex: false,
+            include_pattern: None,
+            exclude_pattern: None,
+            max_results: Some(10),
+        };
+
+        let matches = search_workspace_content(search_opts).unwrap();
+        assert_eq!(matches.len(), 3);
+
+        // Test file search
+        let file_matches = search_workspace_files(
+            vec![test_dir.to_string_lossy().to_string()],
+            "alpha".to_string(),
+            None,
+        ).unwrap();
+        assert_eq!(file_matches.len(), 1);
+        assert_eq!(file_matches[0].name, "alpha.ts");
+
+        // Test replace workspace content
+        let rep_opts = WorkspaceReplaceOptions {
+            root_paths: vec![test_dir.to_string_lossy().to_string()],
+            query: "sharkName".to_string(),
+            replacement: "oceanBeast".to_string(),
+            case_sensitive: true,
+            whole_word: true,
+            is_regex: false,
+            include_pattern: None,
+            exclude_pattern: None,
+            target_files: None,
+        };
+
+        let summary = replace_workspace_content(rep_opts).unwrap();
+        assert_eq!(summary.files_modified, 2);
+        assert_eq!(summary.occurrences_replaced, 3);
+
+        let after1 = std::fs::read_to_string(&file1).unwrap();
+        assert!(after1.contains("oceanBeast"));
+        assert!(!after1.contains("sharkName"));
+
+        let _ = std::fs::remove_dir_all(&test_dir);
+    }
+
+}

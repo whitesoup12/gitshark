@@ -23,6 +23,7 @@ import {
   History,
   FileText,
   Code,
+  Palette,
   FolderPlus,
   FilePlus,
 } from "lucide-react";
@@ -548,6 +549,19 @@ export const CommandPaletteModal: React.FC = () => {
       onSelect: () => {
         close();
         setCloneModalOpen(true);
+      },
+    });
+
+    items.push({
+      id: "action-open-themes",
+      category: "actions",
+      title: "Preferences: Color Theme...",
+      subtitle: "Customize color theme for GitShark and CodeShark",
+      icon: <Palette className="w-4 h-4 text-cyan-400" />,
+      keywords: ["theme", "color", "appearance", "dark", "light", "dracula", "nord", "tokyo", "abyssal"],
+      onSelect: () => {
+        close();
+        openSettings("appearance");
       },
     });
 

@@ -3,8 +3,148 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* ========================================================
+   THEMES: GitShark & CodeShark Color Palettes
+   ======================================================== */
+
+:root, [data-theme="shark-dark"] {
   color-scheme: dark;
+  --shark-950: 9 13 22;      /* #090d16 */
+  --shark-900: 15 23 42;     /* #0f172a */
+  --shark-850: 20 30 52;     /* #141e34 */
+  --shark-800: 30 41 59;     /* #1e293b */
+  --shark-750: 39 53 77;     /* #27354d */
+  --shark-700: 51 65 85;     /* #334155 */
+  --shark-650: 61 75 95;
+  --shark-600: 71 85 105;    /* #475569 */
+  --shark-500: 100 116 139;  /* #64748b */
+  --shark-400: 148 163 184;  /* #94a3b8 */
+  --shark-300: 203 213 225;  /* #cbd5e1 */
+  --shark-200: 226 232 240;  /* #e2e8f0 */
+  --shark-100: 241 245 249;  /* #f1f5f9 */
+  --shark-50: 248 250 252;   /* #f8fafc */
+  --shark-accent: 14 165 233; /* #0ea5e9 */
+  --shark-accent-hover: 2 132 199; /* #0284c7 */
+}
+
+[data-theme="abyssal"] {
+  color-scheme: dark;
+  --shark-950: 4 7 17;       /* #040711 */
+  --shark-900: 8 16 34;      /* #081022 */
+  --shark-850: 12 24 51;     /* #0c1833 */
+  --shark-800: 18 34 68;     /* #122244 */
+  --shark-750: 26 47 90;     /* #1a2f5a */
+  --shark-700: 37 62 116;    /* #253e74 */
+  --shark-650: 45 74 135;
+  --shark-600: 54 86 150;
+  --shark-500: 83 128 140;
+  --shark-400: 45 212 191;   /* #2dd4bf */
+  --shark-300: 94 234 212;   /* #5eead4 */
+  --shark-200: 153 246 228;  /* #99f6e4 */
+  --shark-100: 204 251 241;  /* #ccfbf1 */
+  --shark-50: 240 253 250;   /* #f0fdfa */
+  --shark-accent: 20 184 166; /* #14b8a6 */
+  --shark-accent-hover: 13 148 136; /* #0d9488 */
+}
+
+[data-theme="dracula"] {
+  color-scheme: dark;
+  --shark-950: 30 31 41;     /* #1e1f29 */
+  --shark-900: 40 42 54;     /* #282a36 */
+  --shark-850: 52 55 70;     /* #343746 */
+  --shark-800: 68 71 90;     /* #44475a */
+  --shark-750: 82 86 108;    /* #52566c */
+  --shark-700: 98 114 164;   /* #6272a4 */
+  --shark-650: 110 125 175;
+  --shark-600: 125 140 190;
+  --shark-500: 139 152 195;
+  --shark-400: 189 147 249;  /* #bd93f9 */
+  --shark-300: 241 241 250;
+  --shark-200: 248 248 242;  /* #f8f8f2 */
+  --shark-100: 248 248 242;
+  --shark-50: 255 255 255;
+  --shark-accent: 255 121 198; /* #ff79c6 */
+  --shark-accent-hover: 255 146 208;
+}
+
+[data-theme="tokyo-night"] {
+  color-scheme: dark;
+  --shark-950: 22 22 30;     /* #16161e */
+  --shark-900: 26 27 38;     /* #1a1b26 */
+  --shark-850: 31 35 53;     /* #1f2335 */
+  --shark-800: 36 40 59;     /* #24283b */
+  --shark-750: 47 53 79;     /* #2f354f */
+  --shark-700: 59 66 97;     /* #3b4261 */
+  --shark-650: 70 78 115;
+  --shark-600: 86 95 137;
+  --shark-500: 105 117 165;
+  --shark-400: 122 162 247;  /* #7aa2f7 */
+  --shark-300: 154 165 206;
+  --shark-200: 169 177 214;
+  --shark-100: 192 202 245;  /* #c0caf5 */
+  --shark-50: 220 227 255;
+  --shark-accent: 125 207 255; /* #7dcfff */
+  --shark-accent-hover: 122 162 247;
+}
+
+[data-theme="nord"] {
+  color-scheme: dark;
+  --shark-950: 36 41 51;     /* #242933 */
+  --shark-900: 46 52 64;     /* #2e3440 */
+  --shark-850: 53 60 74;     /* #353c4a */
+  --shark-800: 59 66 82;     /* #3b4252 */
+  --shark-750: 67 76 94;     /* #434c5e */
+  --shark-700: 76 86 106;    /* #4c566a */
+  --shark-650: 88 98 120;
+  --shark-600: 97 110 136;
+  --shark-500: 136 146 176;
+  --shark-400: 129 161 193;  /* #81a1c1 */
+  --shark-300: 194 208 224;
+  --shark-200: 216 222 233;  /* #d8dee9 */
+  --shark-100: 229 233 240;  /* #e5e9f0 */
+  --shark-50: 236 239 244;   /* #eceff4 */
+  --shark-accent: 136 192 208; /* #88c0d0 */
+  --shark-accent-hover: 129 161 193;
+}
+
+[data-theme="one-dark"] {
+  color-scheme: dark;
+  --shark-950: 30 30 36;     /* #1e1e24 */
+  --shark-900: 40 44 52;     /* #282c34 */
+  --shark-850: 44 49 58;     /* #2c313a */
+  --shark-800: 53 59 69;     /* #353b45 */
+  --shark-750: 62 68 81;     /* #3e4451 */
+  --shark-700: 75 82 99;     /* #4b5263 */
+  --shark-650: 85 92 110;
+  --shark-600: 92 99 112;    /* #5c6370 */
+  --shark-500: 130 137 151;
+  --shark-400: 97 175 239;   /* #61afef */
+  --shark-300: 157 165 180;
+  --shark-200: 171 178 191;  /* #abb2bf */
+  --shark-100: 200 206 218;
+  --shark-50: 225 229 237;
+  --shark-accent: 97 175 239; /* #61afef */
+  --shark-accent-hover: 82 139 255;
+}
+
+[data-theme="daylight-reef"] {
+  color-scheme: light;
+  --shark-950: 241 245 249;  /* #f1f5f9 */
+  --shark-900: 248 250 252;  /* #f8fafc */
+  --shark-850: 238 242 246;
+  --shark-800: 226 232 240;  /* #e2e8f0 */
+  --shark-750: 203 213 225;  /* #cbd5e1 */
+  --shark-700: 148 163 184;  /* #94a3b8 */
+  --shark-650: 120 135 155;
+  --shark-600: 100 116 139;  /* #64748b */
+  --shark-500: 71 85 105;    /* #475569 */
+  --shark-400: 51 65 85;     /* #334155 */
+  --shark-300: 39 53 77;     /* #27354d */
+  --shark-200: 30 41 59;     /* #1e293b */
+  --shark-100: 15 23 42;     /* #0f172a */
+  --shark-50: 9 13 22;       /* #090d16 */
+  --shark-accent: 2 132 199;  /* #0284c7 */
+  --shark-accent-hover: 3 105 161;
 }
 
 /* Custom slick dark scrollbars */
@@ -177,7 +317,6 @@
 .animate-chomp-wave {
   animation: chompShockwave 2.4s ease-out forwards;
 }
-
 
 /* Hide scrollbars across browsers */
 .no-scrollbar::-webkit-scrollbar {

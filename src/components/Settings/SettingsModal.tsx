@@ -23,10 +23,14 @@ import { APP_VERSION } from "@/constants/version";
 import { useUpdateStore } from "@/store/useUpdateStore";
 import { openInBrowserIpc } from "@/lib/ipc";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
+import { useChangelogStore } from "@/store/useChangelogStore";
 import type { SettingsTab } from "@/types";
+import { THEMES } from "@/lib/theme";
 
 export const SettingsModal: React.FC = () => {
   const {
+    currentTheme,
+    setTheme,
     isSettingsOpen,
     activeTab,
     gitInfo,
@@ -537,16 +541,64 @@ export const SettingsModal: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="p-4 rounded-lg bg-shark-950 border border-shark-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-medium text-slate-200">Shark Dark (Default)</div>
-                      <div className="text-[11px] text-slate-500">Deep slate & obsidian optimized for long developer sessions</div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[11px] bg-sky-950 text-sky-400 border border-sky-800/40 font-medium">
-                      Active
-                    </span>
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {THEMES.map((theme) => {
+                    const isActive = currentTheme === theme.id;
+                    return (
+                      <div
+                        key={theme.id}
+                        onClick={() => setTheme(theme.id)}
+                        className={`p-3.5 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${
+                          isActive
+                            ? "bg-shark-900 border-cyan-500 shadow-md shadow-cyan-950/40 ring-1 ring-cyan-500/50"
+                            : "bg-shark-950/70 border-shark-800 hover:border-shark-700 hover:bg-shark-900/60"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs font-semibold text-slate-200">{theme.name}</span>
+                            <div className="flex items-center space-x-1.5">
+                              <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-shark-800 text-slate-400 border border-shark-700/50">
+                                {theme.type}
+                              </span>
+                              {isActive && (
+                                <span className="flex items-center space-x-1 px-1.5 py-0.2 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-700 font-bold">
+                                  <Check className="w-3 h-3" />
+                                  <span>Active</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed mb-3">{theme.description}</p>
+                        </div>
+
+                        {/* Color Swatch Preview */}
+                        <div className="flex items-center space-x-1.5 pt-2 border-t border-shark-850/80">
+                          <span className="text-[10px] text-slate-500 mr-1">Palette:</span>
+                          <div
+                            title="Primary background"
+                            style={{ backgroundColor: theme.primaryBg }}
+                            className="w-5 h-5 rounded border border-white/10 shadow-inner"
+                          />
+                          <div
+                            title="Secondary background"
+                            style={{ backgroundColor: theme.secondaryBg }}
+                            className="w-5 h-5 rounded border border-white/10 shadow-inner"
+                          />
+                          <div
+                            title="Accent color"
+                            style={{ backgroundColor: theme.accent }}
+                            className="w-5 h-5 rounded border border-white/10 shadow-sm"
+                          />
+                          <div
+                            title="Text foreground"
+                            style={{ backgroundColor: theme.text }}
+                            className="w-5 h-5 rounded border border-white/10 shadow-inner"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div>
@@ -653,6 +705,15 @@ export const SettingsModal: React.FC = () => {
                     <p className="text-xs text-slate-400 leading-relaxed">
                       Blazingly fast, modern Git desktop client built with Tauri v2, Rust (libgit2), React 19, and Tailwind CSS.
                     </p>
+                    <div className="pt-1.5 flex items-center gap-2">
+                      <button
+                        onClick={() => useChangelogStore.getState().openWhatsNew()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-950/80 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-800/60 shadow-sm transition-all hover:scale-105 active:scale-95"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>What's New in v{APP_VERSION}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -663,14 +724,23 @@ export const SettingsModal: React.FC = () => {
                       <Sparkles className="w-4 h-4 text-sky-400" />
                       <span className="font-medium text-slate-200">Software Updates</span>
                     </div>
-                    <button
-                      onClick={() => checkForUpdates(true)}
-                      disabled={isCheckingUpdates}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-shark-850 hover:bg-shark-800 border border-shark-750 text-slate-300 hover:text-slate-100 transition-colors text-[11px] disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3 h-3 text-sky-400 ${isCheckingUpdates ? "animate-spin" : ""}`} />
-                      <span>{isCheckingUpdates ? "Checking..." : "Check for Updates"}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => useChangelogStore.getState().openWhatsNew()}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-shark-850 hover:bg-shark-800 border border-shark-750 text-slate-300 hover:text-cyan-300 transition-colors text-[11px]"
+                      >
+                        <Sparkles className="w-3 h-3 text-cyan-400" />
+                        <span>Release Notes</span>
+                      </button>
+                      <button
+                        onClick={() => checkForUpdates(true)}
+                        disabled={isCheckingUpdates}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-shark-850 hover:bg-shark-800 border border-shark-750 text-slate-300 hover:text-slate-100 transition-colors text-[11px] disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3 h-3 text-sky-400 ${isCheckingUpdates ? "animate-spin" : ""}`} />
+                        <span>{isCheckingUpdates ? "Checking..." : "Check for Updates"}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {hasUpdate && latestVersion ? (

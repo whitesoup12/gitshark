@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Tab } from "@/types";
 import {
   GitBranch,
@@ -7,12 +7,16 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   RefreshCw,
   FolderTree,
+  Folder,
+  FolderOpen,
   ShieldCheck,
   Globe,
   ArrowUp,
   ArrowDown,
+  Cloud,
   Plus,
   Play,
   Trash2,
@@ -62,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     openInPrView,
     pruneWorktrees,
     openRepositoryTab,
+    openRepoInBrowser,
     removeWorktree,
     fetchWorktrees,
   } = useWorkspaceStore();
@@ -102,6 +107,85 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
   const [checkoutNewBranch, setCheckoutNewBranch] = useState(true);
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
   const [isFetchingRemote, setIsFetchingRemote] = useState(false);
+
+  // Branch pagination and remote fork dropdown states
+  const [showAllLocal, setShowAllLocal] = useState(false);
+  const [openRemoteForks, setOpenRemoteForks] = useState<Record<string, boolean>>({ origin: true });
+  const [showAllRemoteForks, setShowAllRemoteForks] = useState<Record<string, boolean>>({});
+  const [openRemoteFolders, setOpenRemoteFolders] = useState<Record<string, boolean>>({});
+
+  // Sync states for Repo Header icon buttons
+  const [isPulling, setIsPulling] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+  const [isFetchingSync, setIsFetchingSync] = useState(false);
+
+  const sync = tab.remoteSync;
+  const ahead = sync?.ahead ?? 0;
+  const behind = sync?.behind ?? 0;
+  const hasUpstream = sync?.has_upstream ?? false;
+
+  const isHookPushing = tab.hookState?.status === "running" && tab.hookState?.lastCommand === "push";
+  const isHookPulling = tab.hookState?.status === "running" && tab.hookState?.lastCommand === "pull";
+  const isHookFetching = tab.hookState?.status === "running" && tab.hookState?.lastCommand === "fetch";
+  const isHookRunning = tab.hookState?.status === "running";
+
+  const effectivePushing = isPushing || isHookPushing;
+  const effectivePulling = isPulling || isHookPulling;
+  const effectiveFetching = isFetchingSync || isHookFetching;
+  const isSyncBusy = effectivePulling || effectivePushing || effectiveFetching || isHookRunning;
+
+  const handleHeaderPull = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!tab.repoId || isSyncBusy) return;
+    setIsPulling(true);
+    try {
+      await executePull(tab.id);
+      await fetchRemoteSyncStatus(tab.id);
+      await fetchBranches(tab.id);
+      await refreshTabMetadata(tab.id);
+    } catch (err) {
+      console.warn("Pull failed:", err);
+    } finally {
+      setIsPulling(false);
+    }
+  };
+
+  const handleHeaderPush = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!tab.repoId || isSyncBusy) return;
+    setIsPushing(true);
+    try {
+      await executePush(tab.id, undefined, undefined, false, !hasUpstream);
+      await fetchRemoteSyncStatus(tab.id);
+      await fetchBranches(tab.id);
+      await refreshTabMetadata(tab.id);
+    } catch (err) {
+      console.warn("Push failed:", err);
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  const handleHeaderFetch = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!tab.repoId || isSyncBusy) return;
+    setIsFetchingSync(true);
+    try {
+      await executeFetch(tab.id, undefined, true);
+      await fetchRemoteSyncStatus(tab.id);
+      await fetchBranches(tab.id);
+      await refreshTabMetadata(tab.id);
+    } catch (err) {
+      console.warn("Fetch failed:", err);
+    } finally {
+      setIsFetchingSync(false);
+    }
+  };
+
+  const currentBranchName = tab.metadata?.current_branch;
+  const activeBranchPr = currentBranchName
+    ? (tab.pullRequests || []).find((pr) => pr.source_branch === currentBranchName)
+    : null;
   const [contextMenu, setContextMenu] = useState<{
     branch: BranchItem;
     activePr?: PullRequestInfo | null;
@@ -295,6 +379,148 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
 
   const remoteBranches = tab.branches?.remote ?? [];
 
+  // Sorted local branches: active HEAD branch first, then alphabetical
+  const sortedLocalBranches = useMemo(() => {
+    return [...localBranches].sort((a, b) => {
+      const aIsCurrent = a.is_head || a.shorthand === currentBranch;
+      const bIsCurrent = b.is_head || b.shorthand === currentBranch;
+      if (aIsCurrent) return -1;
+      if (bIsCurrent) return 1;
+      return a.shorthand.localeCompare(b.shorthand);
+    });
+  }, [localBranches, currentBranch]);
+
+  const visibleLocalBranches = showAllLocal
+    ? sortedLocalBranches
+    : sortedLocalBranches.slice(0, 10);
+
+  interface RemoteBranchEntry {
+    branch: BranchItem;
+    remoteName: string;
+    subPath: string;
+    folder: string | null;
+    leafName: string;
+  }
+
+  interface RemoteForkGroup {
+    name: string;
+    branches: RemoteBranchEntry[];
+    folders: Record<string, RemoteBranchEntry[]>;
+    rootBranches: RemoteBranchEntry[];
+  }
+
+  const remoteForkGroups = useMemo<RemoteForkGroup[]>(() => {
+    const forkMap: Record<string, RemoteBranchEntry[]> = {};
+
+    for (const b of remoteBranches) {
+      const slashIndex = b.shorthand.indexOf("/");
+      const remoteName = slashIndex > -1 ? b.shorthand.slice(0, slashIndex) : "origin";
+      const subPath = slashIndex > -1 ? b.shorthand.slice(slashIndex + 1) : b.shorthand;
+
+      const subSlashIndex = subPath.indexOf("/");
+      const folder = subSlashIndex > -1 ? subPath.slice(0, subSlashIndex) : null;
+      const leafName = subSlashIndex > -1 ? subPath.slice(subSlashIndex + 1) : subPath;
+
+      if (!forkMap[remoteName]) {
+        forkMap[remoteName] = [];
+      }
+      forkMap[remoteName].push({
+        branch: b,
+        remoteName,
+        subPath,
+        folder,
+        leafName,
+      });
+    }
+
+    const sortedForkNames = Object.keys(forkMap).sort((a, b) => {
+      if (a === "origin") return -1;
+      if (b === "origin") return 1;
+      return a.localeCompare(b);
+    });
+
+    return sortedForkNames.map((name) => {
+      const branches = forkMap[name];
+      const folders: Record<string, RemoteBranchEntry[]> = {};
+      const rootBranches: RemoteBranchEntry[] = [];
+
+      for (const entry of branches) {
+        if (entry.folder) {
+          if (!folders[entry.folder]) {
+            folders[entry.folder] = [];
+          }
+          folders[entry.folder].push(entry);
+        } else {
+          rootBranches.push(entry);
+        }
+      }
+
+      rootBranches.sort((a, b) => a.leafName.localeCompare(b.leafName));
+
+      for (const folder of Object.keys(folders)) {
+        folders[folder].sort((a, b) => a.leafName.localeCompare(b.leafName));
+      }
+
+      return {
+        name,
+        branches,
+        folders,
+        rootBranches,
+      };
+    });
+  }, [remoteBranches]);
+
+  const renderRemoteBranchRow = (
+    branch: BranchItem,
+    displayName: string,
+    indent = false
+  ) => (
+    <div
+      key={branch.name}
+      onClick={() => handleSelectBranchCommit(branch)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({
+          branch,
+          x: e.clientX,
+          y: e.clientY,
+        });
+      }}
+      className={`group flex items-center justify-between px-2 py-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800/60 cursor-pointer transition-colors ${
+        indent ? "pl-4" : ""
+      }`}
+      title={`Click to view '${branch.shorthand}' in graph (right-click for actions)`}
+    >
+      <div className="flex items-center gap-2 truncate flex-1 mr-2">
+        <Globe className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+        <span className="truncate text-xs font-mono">{displayName}</span>
+      </div>
+      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCheckoutBranch(branch);
+          }}
+          className="text-[10px] text-slate-400 hover:text-indigo-300 hover:bg-indigo-950/70 px-1 py-0.5 rounded border border-transparent hover:border-indigo-800/50 transition-colors font-mono"
+          title={`Checkout local branch from '${branch.shorthand}'`}
+        >
+          checkout
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            promptDeleteBranch(branch.shorthand, true);
+          }}
+          className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-750 transition-colors"
+          title={`Delete remote branch '${branch.shorthand}'`}
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <aside
       style={{
@@ -336,13 +562,73 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
         </div>
 
         {!tab.sidebarCollapsed && (
-          <button
-            onClick={() => refreshTabMetadata(tab.id)}
-            className="p-1 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-800 transition-colors"
-            title="Refresh Repository State"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {/* Pull Icon Button */}
+            <button
+              onClick={handleHeaderPull}
+              disabled={isSyncBusy}
+              className={`relative flex items-center justify-center w-7 h-7 rounded transition-colors ${
+                behind > 0
+                  ? "bg-indigo-950/80 text-indigo-300 border border-indigo-700/60 hover:bg-indigo-900/80 shadow-sm"
+                  : "text-slate-400 hover:text-slate-100 hover:bg-shark-800"
+              } disabled:opacity-50`}
+              title={
+                behind > 0
+                  ? `${behind} commits behind remote. Click to pull (git pull).`
+                  : "Pull changes from remote (git pull)"
+              }
+            >
+              <ArrowDown className={`w-3.5 h-3.5 text-indigo-400 ${effectivePulling ? "animate-bounce" : ""}`} />
+              {behind > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full text-[9px] font-mono font-bold bg-indigo-500 text-white flex items-center justify-center leading-none shadow-sm">
+                  {behind}
+                </span>
+              )}
+            </button>
+
+            {/* Push Icon Button */}
+            <button
+              onClick={handleHeaderPush}
+              disabled={isSyncBusy}
+              className={`relative flex items-center justify-center w-7 h-7 rounded transition-colors ${
+                ahead > 0
+                  ? "bg-sky-950/80 text-sky-300 border border-sky-700/60 hover:bg-sky-900/80 shadow-sm"
+                  : "text-slate-400 hover:text-slate-100 hover:bg-shark-800"
+              } disabled:opacity-50`}
+              title={
+                !hasUpstream
+                  ? "Publish current branch to remote (git push --set-upstream)"
+                  : ahead > 0
+                  ? `${ahead} commits ahead of remote. Click to push (git push).`
+                  : "Push local commits to remote (git push)"
+              }
+            >
+              {!hasUpstream ? (
+                <Cloud className={`w-3.5 h-3.5 text-sky-400 ${effectivePushing ? "animate-pulse" : ""}`} />
+              ) : (
+                <ArrowUp className={`w-3.5 h-3.5 text-sky-400 ${effectivePushing ? "animate-bounce" : ""}`} />
+              )}
+              {ahead > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full text-[9px] font-mono font-bold bg-sky-500 text-white flex items-center justify-center leading-none shadow-sm">
+                  {ahead}
+                </span>
+              )}
+            </button>
+
+            {/* Fetch / Sync Icon Button */}
+            <button
+              onClick={handleHeaderFetch}
+              disabled={isSyncBusy}
+              className="flex items-center justify-center w-7 h-7 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-800 transition-colors disabled:opacity-50"
+              title="Fetch remote & refresh repository status"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  effectiveFetching || effectivePulling || effectivePushing ? "animate-spin text-sky-400" : ""
+                }`}
+              />
+            </button>
+          </div>
         )}
       </div>
 
@@ -460,7 +746,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                   </form>
                 )}
 
-                {localBranches.map((branch) => {
+                {visibleLocalBranches.map((branch) => {
                   const isCurrent = branch.is_head || branch.shorthand === currentBranch;
                   const hasUncommitted = (isCurrent && (metadata?.is_dirty || (metadata?.staged_count ?? 0) + (metadata?.unstaged_count ?? 0) + (metadata?.untracked_count ?? 0) > 0)) || Boolean(branch.has_uncommitted);
                   const aheadCount = isCurrent && tab.remoteSync ? tab.remoteSync.ahead : (branch.ahead ?? 0);
@@ -648,6 +934,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                     </div>
                   );
                 })}
+
+                {localBranches.length > 10 && (
+                  <button
+                    onClick={() => setShowAllLocal((prev) => !prev)}
+                    className="w-full flex items-center justify-center gap-1.5 py-1 px-2 mt-1 rounded text-[11px] font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-950/40 border border-dashed border-sky-850 hover:border-sky-700/60 transition-all select-none"
+                  >
+                    {showAllLocal ? (
+                      <>
+                        <ChevronUp className="w-3 h-3" />
+                        <span>Show Less</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-3 h-3" />
+                        <span>View All ({localBranches.length})</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -713,56 +1018,142 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
               </div>
             </div>
             {sectionsOpen.remotes && (
-              <div className="mt-1 space-y-0.5 pl-2">
-                {remoteBranches.length === 0 ? (
+              <div className="mt-1 space-y-1 pl-1">
+                {remoteForkGroups.length === 0 ? (
                   <div className="pl-2 text-slate-500 text-[11px] italic py-0.5">
                     No remote tracking branches
                   </div>
                 ) : (
-                  remoteBranches.map((branch) => (
-                    <div
-                      key={branch.name}
-                      onClick={() => handleSelectBranchCommit(branch)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setContextMenu({
-                          branch,
-                          x: e.clientX,
-                          y: e.clientY,
-                        });
-                      }}
-                      className="group flex items-center justify-between px-2 py-1 rounded text-slate-400 hover:text-slate-200 hover:bg-shark-800/60 cursor-pointer transition-colors"
-                      title={`Click to view '${branch.shorthand}' in graph (right-click for actions)`}
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <Globe className="w-3 h-3 text-indigo-400 flex-shrink-0" />
-                        <span className="truncate">{branch.shorthand}</span>
+                  remoteForkGroups.map((fork) => {
+                    const isForkOpen = openRemoteForks[fork.name] ?? (fork.name === "origin");
+                    const isForkExpanded = !!showAllRemoteForks[fork.name];
+                    const folderNames = Object.keys(fork.folders).sort();
+
+                    // Count total branches and prepare visible branches up to 10 if not expanded
+                    const maxBranches = isForkExpanded ? Infinity : 10;
+                    const visibleSet = new Set(fork.branches.slice(0, maxBranches).map((b) => b.branch.name));
+                    const visibleRootBranches = fork.rootBranches.filter((b) => visibleSet.has(b.branch.name));
+
+                    return (
+                      <div key={fork.name} className="space-y-0.5">
+                        {/* Remote Fork Dropdown Header */}
+                        <div className="flex items-center justify-between w-full px-1.5 py-1 text-slate-300 hover:text-slate-100 font-medium group select-none rounded hover:bg-shark-850/60 transition-colors">
+                          <button
+                            onClick={() =>
+                              setOpenRemoteForks((prev) => ({
+                                ...prev,
+                                [fork.name]: !isForkOpen,
+                              }))
+                            }
+                            className="flex items-center gap-1.5 flex-1 text-left min-w-0"
+                          >
+                            {isForkOpen ? (
+                              <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                            ) : (
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                            )}
+                            <Globe className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                            <span className="font-mono text-xs font-semibold text-slate-200 truncate">
+                              {fork.name}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono flex-shrink-0">
+                              ({fork.branches.length})
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Remote Fork Children */}
+                        {isForkOpen && (
+                          <div className="pl-3 space-y-0.5">
+                            {/* Root Branches (no folder) */}
+                            {visibleRootBranches.map((entry) =>
+                              renderRemoteBranchRow(entry.branch, entry.leafName)
+                            )}
+
+                            {/* Folder Dropdowns */}
+                            {folderNames.map((folderName) => {
+                              const folderBranches = fork.folders[folderName];
+                              const visibleFolderBranches = folderBranches.filter((b) =>
+                                visibleSet.has(b.branch.name)
+                              );
+                              if (visibleFolderBranches.length === 0) return null;
+
+                              const folderKey = `${fork.name}:${folderName}`;
+                              const isFolderOpen = openRemoteFolders[folderKey] ?? true;
+
+                              return (
+                                <div key={folderName} className="space-y-0.5">
+                                  {/* Sub-folder Header */}
+                                  <div
+                                    onClick={() =>
+                                      setOpenRemoteFolders((prev) => ({
+                                        ...prev,
+                                        [folderKey]: !isFolderOpen,
+                                      }))
+                                    }
+                                    className="flex items-center justify-between px-1.5 py-0.5 text-slate-400 hover:text-slate-200 hover:bg-shark-850/40 rounded cursor-pointer select-none transition-colors"
+                                  >
+                                    <div className="flex items-center gap-1.5 truncate">
+                                      {isFolderOpen ? (
+                                        <ChevronDown className="w-3 h-3 text-slate-500 flex-shrink-0" />
+                                      ) : (
+                                        <ChevronRight className="w-3 h-3 text-slate-500 flex-shrink-0" />
+                                      )}
+                                      {isFolderOpen ? (
+                                        <FolderOpen className="w-3 h-3 text-amber-400/80 flex-shrink-0" />
+                                      ) : (
+                                        <Folder className="w-3 h-3 text-amber-400/80 flex-shrink-0" />
+                                      )}
+                                      <span className="font-mono text-[11.5px] text-slate-300 font-medium truncate">
+                                        {folderName}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 font-mono flex-shrink-0">
+                                        ({folderBranches.length})
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Folder Branches */}
+                                  {isFolderOpen && (
+                                    <div className="pl-2 space-y-0.5">
+                                      {visibleFolderBranches.map((entry) =>
+                                        renderRemoteBranchRow(entry.branch, entry.leafName, true)
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            {/* View All / Show Less for Fork */}
+                            {fork.branches.length > 10 && (
+                              <button
+                                onClick={() =>
+                                  setShowAllRemoteForks((prev) => ({
+                                    ...prev,
+                                    [fork.name]: !isForkExpanded,
+                                  }))
+                                }
+                                className="w-full flex items-center justify-center gap-1.5 py-1 px-2 mt-1 rounded text-[11px] font-medium text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/40 border border-dashed border-indigo-900/60 hover:border-indigo-700/60 transition-all select-none"
+                              >
+                                {isForkExpanded ? (
+                                  <>
+                                    <ChevronUp className="w-3 h-3" />
+                                    <span>Show Less</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="w-3 h-3" />
+                                    <span>View All ({fork.branches.length})</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCheckoutBranch(branch);
-                          }}
-                          className="text-[10px] text-slate-400 hover:text-indigo-300 hover:bg-indigo-950/70 px-1 py-0.5 rounded border border-transparent hover:border-indigo-800/50 transition-colors font-mono"
-                          title={`Checkout local branch from '${branch.shorthand}'`}
-                        >
-                          checkout
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            promptDeleteBranch(branch.shorthand, true);
-                          }}
-                          className="p-0.5 rounded text-slate-400 hover:text-rose-400 hover:bg-shark-750 transition-colors"
-                          title={`Delete remote branch '${branch.shorthand}'`}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -841,6 +1232,45 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Footer Section: Remote Repository Links (Browser & New PR) */}
+      {!tab.sidebarCollapsed && (
+        <div className="px-2.5 py-1.5 border-t border-shark-800/80 bg-shark-950/50 flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => openRepoInBrowser(tab.id)}
+            className="flex-1 flex items-center justify-center gap-1.5 h-7 px-2 rounded text-xs border border-shark-800 text-slate-300 hover:text-sky-300 hover:border-sky-800/60 hover:bg-shark-850 transition-colors shadow-sm"
+            title="Open Repository in Browser (Ctrl+Shift+B / Cmd+Shift+B)"
+          >
+            <Globe className="w-3.5 h-3.5 text-sky-400" />
+            <span className="text-[11px] font-medium">Browser</span>
+          </button>
+
+          <button
+            onClick={() => {
+              if (activeBranchPr) {
+                openInBrowserIpc(activeBranchPr.url);
+              } else {
+                createPullRequestInBrowser(tab.id);
+              }
+            }}
+            className={`flex-1 flex items-center justify-center gap-1.5 h-7 px-2 rounded text-xs border transition-colors shadow-sm ${
+              activeBranchPr
+                ? "border-emerald-700/60 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 hover:border-emerald-600"
+                : "border-shark-800 text-slate-300 hover:text-emerald-300 hover:border-emerald-800/60 hover:bg-shark-850"
+            }`}
+            title={
+              activeBranchPr
+                ? `Pull Request #${activeBranchPr.number}: ${activeBranchPr.title}${activeBranchPr.is_draft ? " (Draft)" : ""} — Click to open in browser`
+                : "Create Pull Request in Browser (Ctrl+Shift+P / Cmd+Shift+P)"
+            }
+          >
+            <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-[11px] font-medium truncate">
+              {activeBranchPr ? `PR #${activeBranchPr.number}` : "New PR"}
+            </span>
+          </button>
         </div>
       )}
 

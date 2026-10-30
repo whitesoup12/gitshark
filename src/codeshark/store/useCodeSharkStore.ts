@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import type { ProjectRoot, FileTreeNode, OpenFileTab } from "@/types";
+import type {
+  ProjectRoot,
+  FileTreeNode,
+  OpenFileTab,
+  WorkspaceContentMatch,
+  WorkspaceFileMatch,
+} from "@/types";
 import {
   getPathInfoIpc,
   readDirEntriesIpc,
@@ -7,6 +13,14 @@ import {
   writeTextFileIpc,
   getRepoGitStatusIpc,
   getFileGitHeadContentIpc,
+  createCodeSharkFileIpc,
+  createCodeSharkDirIpc,
+  renameCodeSharkPathIpc,
+  deleteCodeSharkPathIpc,
+  revealInFileManagerIpc,
+  searchWorkspaceContentIpc,
+  replaceWorkspaceContentIpc,
+  searchWorkspaceFilesIpc,
 } from "@/lib/ipc";
 import { detectLanguageByFilename, normalizePath } from "../utils/language";
 
@@ -24,6 +38,23 @@ const getInitialQuietLinting = (): boolean => {
   return true; // Default to true: clean syntax without squigglies/linting
 };
 
+function getParentDir(pathStr: string): string {
+  const norm = normalizePath(pathStr);
+  const lastSlash = norm.lastIndexOf("/");
+  return lastSlash > 0 ? norm.slice(0, lastSlash) : norm;
+}
+
+export interface JumpLocation {
+  filePath: string;
+  line: number;
+  col?: number;
+  endCol?: number;
+  timestamp: number;
+}
+
+// Global in-flight set to prevent concurrent duplicate file opens (e.g. from rapid events or strict-mode mounts)
+const inFlightOpeningFiles = new Set<string>();
+
 interface CodeSharkState {
   projects: ProjectRoot[];
   expandedFolders: Record<string, boolean>;
@@ -38,7 +69,78 @@ interface CodeSharkState {
   statusMessage: string | null;
   cursorPos: { line: number; col: number };
 
-  // Actions
+  // Sidebar Tab: files or search
+  sidebarTab: "files" | "search";
+  setSidebarTab: (tab: "files" | "search") => void;
+
+  // Global Search & Replace
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
+  replaceQuery: string;
+  setReplaceQuery: (r: string) => void;
+  isReplaceOpen: boolean;
+  toggleReplaceOpen: () => void;
+  searchCaseSensitive: boolean;
+  toggleSearchCaseSensitive: () => void;
+  searchWholeWord: boolean;
+  toggleSearchWholeWord: () => void;
+  searchIsRegex: boolean;
+  toggleSearchIsRegex: () => void;
+  searchIncludePattern: string;
+  setSearchIncludePattern: (p: string) => void;
+  searchExcludePattern: string;
+  setSearchExcludePattern: (p: string) => void;
+  searchResults: WorkspaceContentMatch[];
+  isSearching: boolean;
+  searchSummary: { filesCount: number; matchCount: number } | null;
+  executeGlobalSearch: () => Promise<void>;
+  clearGlobalSearch: () => void;
+  executeGlobalReplace: () => Promise<void>;
+  replaceSingleMatch: (match: WorkspaceContentMatch) => Promise<void>;
+
+  // Quick Open (File finder)
+  quickOpenOpen: boolean;
+  quickOpenQuery: string;
+  quickOpenResults: WorkspaceFileMatch[];
+  isQuickOpenSearching: boolean;
+  openQuickOpen: () => void;
+  closeQuickOpen: () => void;
+  setQuickOpenQuery: (q: string) => void;
+  executeQuickOpenFileSearch: (q: string) => Promise<void>;
+
+  // In-File Find and Replace
+  inFileFindOpen: boolean;
+  inFileReplaceOpen: boolean;
+  inFileQuery: string;
+  inFileReplaceWith: string;
+  inFileMatchIndex: number;
+  inFileTotalMatches: number;
+  inFileCaseSensitive: boolean;
+  inFileWholeWord: boolean;
+  inFileIsRegex: boolean;
+  openInFileFind: (withReplace?: boolean, initialQuery?: string) => void;
+  closeInFileFind: () => void;
+  setInFileQuery: (q: string) => void;
+  setInFileReplaceWith: (r: string) => void;
+  toggleInFileReplace: () => void;
+  toggleInFileCaseSensitive: () => void;
+  toggleInFileWholeWord: () => void;
+  toggleInFileIsRegex: () => void;
+  setInFileMatchStatus: (index: number, total: number) => void;
+
+  // Jump to location (for search navigation)
+  jumpToLocation: JumpLocation | null;
+  setJumpToLocation: (loc: Omit<JumpLocation, "timestamp"> | null) => void;
+
+  // Filesystem Actions
+  createFile: (folderPath: string, fileName: string) => Promise<void>;
+  createDirectory: (folderPath: string, dirName: string) => Promise<void>;
+  renamePath: (oldPath: string, newName: string) => Promise<void>;
+  deletePath: (targetPath: string, isDir?: boolean) => Promise<void>;
+  duplicateFile: (filePath: string) => Promise<void>;
+  revealInFileManager: (targetPath: string) => Promise<void>;
+
+  // Tab & Editor Actions
   initFromPath: (targetPath?: string) => Promise<void>;
   openTarget: (targetPath: string) => Promise<void>;
   addProjectFolder: (dirPath: string) => Promise<void>;
@@ -46,9 +148,9 @@ interface CodeSharkState {
   loadFolderEntries: (folderPath: string) => Promise<void>;
   toggleFolder: (folderPath: string) => Promise<void>;
   openFile: (filePath: string, name?: string, projectId?: string) => Promise<void>;
-  closeTab: (filePath: string) => void;
-  closeOtherTabs: (filePath: string) => void;
-  closeTabsToTheRight: (filePath: string) => void;
+  closeTab: (tabIdOrPath: string) => void;
+  closeOtherTabs: (tabIdOrPath: string) => void;
+  closeTabsToTheRight: (tabIdOrPath: string) => void;
   closeAllTabs: () => void;
   saveAllFiles: () => Promise<void>;
   updateFileContent: (filePath: string, content: string) => void;
@@ -71,10 +173,369 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
   openTabs: [],
   activeFilePath: null,
   sidebarOpen: true,
-  sidebarWidth: 260,
+  sidebarWidth: 280,
   isSaving: false,
   statusMessage: null,
   cursorPos: { line: 1, col: 1 },
+
+  sidebarTab: "files",
+  setSidebarTab: (sidebarTab) => set({ sidebarTab }),
+
+  // Global search state
+  searchQuery: "",
+  setSearchQuery: (searchQuery) => set({ searchQuery }),
+  replaceQuery: "",
+  setReplaceQuery: (replaceQuery) => set({ replaceQuery }),
+  isReplaceOpen: false,
+  toggleReplaceOpen: () => set((s) => ({ isReplaceOpen: !s.isReplaceOpen })),
+  searchCaseSensitive: false,
+  toggleSearchCaseSensitive: () => set((s) => ({ searchCaseSensitive: !s.searchCaseSensitive })),
+  searchWholeWord: false,
+  toggleSearchWholeWord: () => set((s) => ({ searchWholeWord: !s.searchWholeWord })),
+  searchIsRegex: false,
+  toggleSearchIsRegex: () => set((s) => ({ searchIsRegex: !s.searchIsRegex })),
+  searchIncludePattern: "",
+  setSearchIncludePattern: (searchIncludePattern) => set({ searchIncludePattern }),
+  searchExcludePattern: "",
+  setSearchExcludePattern: (searchExcludePattern) => set({ searchExcludePattern }),
+  searchResults: [],
+  isSearching: false,
+  searchSummary: null,
+
+  executeGlobalSearch: async () => {
+    const q = get().searchQuery;
+    if (!q || q.trim().length === 0) {
+      set({ searchResults: [], searchSummary: null });
+      return;
+    }
+    const rootPaths = get().projects.map((p) => p.path);
+    if (rootPaths.length === 0) {
+      set({ statusMessage: "No workspace projects open to search" });
+      return;
+    }
+
+    set({ isSearching: true });
+    try {
+      const results = await searchWorkspaceContentIpc({
+        root_paths: rootPaths,
+        query: q,
+        case_sensitive: get().searchCaseSensitive,
+        whole_word: get().searchWholeWord,
+        is_regex: get().searchIsRegex,
+        include_pattern: get().searchIncludePattern || undefined,
+        exclude_pattern: get().searchExcludePattern || undefined,
+        max_results: 1500,
+      });
+
+      const uniqueFiles = new Set(results.map((r) => r.file_path)).size;
+      set({
+        searchResults: results,
+        isSearching: false,
+        searchSummary: { filesCount: uniqueFiles, matchCount: results.length },
+        statusMessage: `Found ${results.length} matches across ${uniqueFiles} files`,
+      });
+    } catch (err) {
+      console.error("Global search failed:", err);
+      set({ isSearching: false, statusMessage: `Search error: ${String(err)}` });
+    }
+  },
+
+  clearGlobalSearch: () => {
+    set({ searchQuery: "", searchResults: [], searchSummary: null });
+  },
+
+  executeGlobalReplace: async () => {
+    const {
+      searchQuery,
+      replaceQuery,
+      searchCaseSensitive,
+      searchWholeWord,
+      searchIsRegex,
+      searchIncludePattern,
+      searchExcludePattern,
+    } = get();
+    if (!searchQuery) return;
+    const rootPaths = get().projects.map((p) => p.path);
+    if (rootPaths.length === 0) return;
+
+    set({ isSearching: true });
+    try {
+      const summary = await replaceWorkspaceContentIpc({
+        root_paths: rootPaths,
+        query: searchQuery,
+        replacement: replaceQuery,
+        case_sensitive: searchCaseSensitive,
+        whole_word: searchWholeWord,
+        is_regex: searchIsRegex,
+        include_pattern: searchIncludePattern || undefined,
+        exclude_pattern: searchExcludePattern || undefined,
+      });
+
+      // Reload any open tabs whose files were modified
+      for (const modPath of summary.modified_files) {
+        const normMod = normalizePath(modPath);
+        const openTab = get().openTabs.find((t) => normalizePath(t.path) === normMod);
+        if (openTab) {
+          try {
+            const updated = await readTextFileIpc(openTab.path);
+            set((state) => ({
+              openTabs: state.openTabs.map((t) =>
+                normalizePath(t.path) === normMod
+                  ? { ...t, content: updated, originalContent: updated, isDirty: false }
+                  : t
+              ),
+            }));
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      set({
+        isSearching: false,
+        statusMessage: `Replaced ${summary.occurrences_replaced} occurrences in ${summary.files_modified} files`,
+      });
+
+      // Refresh search results
+      await get().executeGlobalSearch();
+      get().refreshGitStatus();
+    } catch (err) {
+      console.error("Global replace failed:", err);
+      set({ isSearching: false, statusMessage: `Replace error: ${String(err)}` });
+    }
+  },
+
+  replaceSingleMatch: async (match: WorkspaceContentMatch) => {
+    try {
+      await replaceWorkspaceContentIpc({
+        root_paths: [match.file_path],
+        query: get().searchQuery,
+        replacement: get().replaceQuery,
+        case_sensitive: get().searchCaseSensitive,
+        whole_word: get().searchWholeWord,
+        is_regex: get().searchIsRegex,
+        target_files: [match.file_path],
+      });
+
+      const normMod = normalizePath(match.file_path);
+      const openTab = get().openTabs.find((t) => normalizePath(t.path) === normMod);
+      if (openTab) {
+        const updated = await readTextFileIpc(openTab.path);
+        set((state) => ({
+          openTabs: state.openTabs.map((t) =>
+            normalizePath(t.path) === normMod
+              ? { ...t, content: updated, originalContent: updated, isDirty: false }
+              : t
+          ),
+        }));
+      }
+
+      set({ statusMessage: `Replaced in ${match.file_name}` });
+      await get().executeGlobalSearch();
+      get().refreshGitStatus();
+    } catch (err) {
+      set({ statusMessage: `Error replacing match: ${String(err)}` });
+    }
+  },
+
+  // Quick Open state & actions
+  quickOpenOpen: false,
+  quickOpenQuery: "",
+  quickOpenResults: [],
+  isQuickOpenSearching: false,
+
+  openQuickOpen: () => {
+    set({ quickOpenOpen: true, quickOpenQuery: "", quickOpenResults: [] });
+    get().executeQuickOpenFileSearch("");
+  },
+  closeQuickOpen: () => set({ quickOpenOpen: false, quickOpenQuery: "", quickOpenResults: [] }),
+  setQuickOpenQuery: (q) => {
+    set({ quickOpenQuery: q });
+    get().executeQuickOpenFileSearch(q);
+  },
+  executeQuickOpenFileSearch: async (q: string) => {
+    const rootPaths = get().projects.map((p) => p.path);
+    if (rootPaths.length === 0) return;
+    set({ isQuickOpenSearching: true });
+    try {
+      const results = await searchWorkspaceFilesIpc(rootPaths, q, 100);
+      set({ quickOpenResults: results, isQuickOpenSearching: false });
+    } catch (err) {
+      console.warn("Quick open search error:", err);
+      set({ isQuickOpenSearching: false });
+    }
+  },
+
+  // In-File Find and Replace
+  inFileFindOpen: false,
+  inFileReplaceOpen: false,
+  inFileQuery: "",
+  inFileReplaceWith: "",
+  inFileMatchIndex: 0,
+  inFileTotalMatches: 0,
+  inFileCaseSensitive: false,
+  inFileWholeWord: false,
+  inFileIsRegex: false,
+
+  openInFileFind: (withReplace?: boolean, initialQuery?: string) => {
+    set((state) => ({
+      inFileFindOpen: true,
+      inFileReplaceOpen: withReplace !== undefined ? withReplace : state.inFileReplaceOpen,
+      inFileQuery: initialQuery !== undefined ? initialQuery : state.inFileQuery,
+    }));
+  },
+  closeInFileFind: () => set({ inFileFindOpen: false, inFileReplaceOpen: false }),
+  setInFileQuery: (inFileQuery) => set({ inFileQuery }),
+  setInFileReplaceWith: (inFileReplaceWith) => set({ inFileReplaceWith }),
+  toggleInFileReplace: () => set((s) => ({ inFileReplaceOpen: !s.inFileReplaceOpen })),
+  toggleInFileCaseSensitive: () => set((s) => ({ inFileCaseSensitive: !s.inFileCaseSensitive })),
+  toggleInFileWholeWord: () => set((s) => ({ inFileWholeWord: !s.inFileWholeWord })),
+  toggleInFileIsRegex: () => set((s) => ({ inFileIsRegex: !s.inFileIsRegex })),
+  setInFileMatchStatus: (inFileMatchIndex, inFileTotalMatches) =>
+    set({ inFileMatchIndex, inFileTotalMatches }),
+
+  jumpToLocation: null,
+  setJumpToLocation: (loc) =>
+    set({
+      jumpToLocation: loc ? { ...loc, timestamp: Date.now() } : null,
+    }),
+
+  // Filesystem actions
+  createFile: async (folderPath: string, fileName: string) => {
+    try {
+      const normFolder = normalizePath(folderPath);
+      const cleanName = fileName.trim();
+      const targetPath = `${normFolder}/${cleanName}`;
+      await createCodeSharkFileIpc(targetPath);
+      await get().loadFolderEntries(normFolder);
+      set((state) => ({
+        expandedFolders: { ...state.expandedFolders, [normFolder]: true },
+        statusMessage: `Created ${cleanName}`,
+      }));
+      await get().openFile(targetPath, cleanName);
+      get().refreshGitStatus();
+    } catch (err) {
+      set({ statusMessage: `Failed to create file: ${String(err)}` });
+    }
+  },
+
+  createDirectory: async (folderPath: string, dirName: string) => {
+    try {
+      const normFolder = normalizePath(folderPath);
+      const cleanName = dirName.trim();
+      const targetPath = `${normFolder}/${cleanName}`;
+      await createCodeSharkDirIpc(targetPath);
+      await get().loadFolderEntries(normFolder);
+      set((state) => ({
+        expandedFolders: { ...state.expandedFolders, [normFolder]: true, [targetPath]: true },
+        statusMessage: `Created folder ${cleanName}`,
+      }));
+    } catch (err) {
+      set({ statusMessage: `Failed to create folder: ${String(err)}` });
+    }
+  },
+
+  renamePath: async (oldPath: string, newName: string) => {
+    try {
+      const normOld = normalizePath(oldPath);
+      const parentDir = getParentDir(normOld);
+      const cleanName = newName.trim();
+      const newPath = `${parentDir}/${cleanName}`;
+      await renameCodeSharkPathIpc(normOld, newPath);
+
+      // Update open tabs if affected
+      set((state) => ({
+        openTabs: state.openTabs.map((tab) => {
+          const tabNorm = normalizePath(tab.path);
+          if (tabNorm === normOld) {
+            return { ...tab, path: newPath, name: cleanName };
+          }
+          if (tabNorm.startsWith(normOld + "/")) {
+            const suffix = tabNorm.slice(normOld.length);
+            return { ...tab, path: newPath + suffix };
+          }
+          return tab;
+        }),
+        activeFilePath:
+          state.activeFilePath && normalizePath(state.activeFilePath) === normOld
+            ? newPath
+            : state.activeFilePath && normalizePath(state.activeFilePath).startsWith(normOld + "/")
+            ? newPath + normalizePath(state.activeFilePath).slice(normOld.length)
+            : state.activeFilePath,
+        statusMessage: `Renamed to ${cleanName}`,
+      }));
+
+      await get().loadFolderEntries(parentDir);
+      get().refreshGitStatus();
+    } catch (err) {
+      set({ statusMessage: `Failed to rename: ${String(err)}` });
+    }
+  },
+
+  deletePath: async (targetPath: string) => {
+    try {
+      const normTarget = normalizePath(targetPath);
+      const parentDir = getParentDir(normTarget);
+      await deleteCodeSharkPathIpc(normTarget);
+
+      // Close affected tabs
+      const remainingTabs = get().openTabs.filter((tab) => {
+        const tabNorm = normalizePath(tab.path);
+        return tabNorm !== normTarget && !tabNorm.startsWith(normTarget + "/");
+      });
+
+      let nextActive = get().activeFilePath;
+      if (nextActive) {
+        const activeNorm = normalizePath(nextActive);
+        if (activeNorm === normTarget || activeNorm.startsWith(normTarget + "/")) {
+          nextActive = remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].path : null;
+        }
+      }
+
+      set({
+        openTabs: remainingTabs,
+        activeFilePath: nextActive,
+        statusMessage: `Deleted ${normTarget.split("/").pop()}`,
+      });
+
+      await get().loadFolderEntries(parentDir);
+      get().refreshGitStatus();
+    } catch (err) {
+      set({ statusMessage: `Failed to delete: ${String(err)}` });
+    }
+  },
+
+  duplicateFile: async (filePath: string) => {
+    try {
+      const normFile = normalizePath(filePath);
+      const parentDir = getParentDir(normFile);
+      const fileName = normFile.split("/").pop() || "file";
+      const parts = fileName.split(".");
+      let newName = "";
+      if (parts.length > 1) {
+        const ext = parts.pop();
+        newName = `${parts.join(".")}_copy.${ext}`;
+      } else {
+        newName = `${fileName}_copy`;
+      }
+      const newPath = `${parentDir}/${newName}`;
+      const content = await readTextFileIpc(filePath);
+      await writeTextFileIpc(newPath, content);
+      await get().loadFolderEntries(parentDir);
+      await get().openFile(newPath, newName);
+      set({ statusMessage: `Duplicated to ${newName}` });
+    } catch (err) {
+      set({ statusMessage: `Failed to duplicate file: ${String(err)}` });
+    }
+  },
+
+  revealInFileManager: async (targetPath: string) => {
+    try {
+      await revealInFileManagerIpc(targetPath);
+    } catch (err) {
+      set({ statusMessage: `Failed to open in file manager: ${String(err)}` });
+    }
+  },
 
   initFromPath: async (targetPath?: string) => {
     if (!targetPath || targetPath.trim().length === 0) return;
@@ -92,13 +553,11 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
       }
 
       if (info.is_dir) {
-        // Check if project is already opened
         const existing = get().projects.find(
           (p) => normalizePath(p.path).toLowerCase() === normalized.toLowerCase()
         );
 
         if (existing) {
-          // Project already open: make sure it's expanded and highlighted
           set((state) => ({
             projects: state.projects.map((p) =>
               p.id === existing.id ? { ...p, isExpanded: true } : p
@@ -109,12 +568,9 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
           return;
         }
 
-        // Add new project root
         await get().addProjectFolder(info.path);
       } else {
-        // Target is an individual file
         const normFile = normalizePath(info.path);
-        // Find if it belongs to any existing project
         const parentProject = get().projects.find((p) => {
           const normProj = normalizePath(p.path).toLowerCase();
           return normFile.toLowerCase().startsWith(normProj + "/");
@@ -217,17 +673,24 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
       return;
     }
 
+    // Prevent duplicate concurrent opens for the same file
+    if (inFlightOpeningFiles.has(norm)) {
+      return;
+    }
+    inFlightOpeningFiles.add(norm);
+
     try {
       const fileName = name || norm.split("/").pop() || "untitled";
       const content = await readTextFileIpc(filePath);
       const language = detectLanguageByFilename(fileName);
 
-      // Fetch committed Git HEAD content if file belongs to an active project
       let gitHeadContent: string | undefined;
-      const targetProjectId = projectId || get().projects.find((p) => {
-        const normProj = normalizePath(p.path).toLowerCase();
-        return norm.toLowerCase().startsWith(normProj + "/");
-      })?.id;
+      const targetProjectId =
+        projectId ||
+        get().projects.find((p) => {
+          const normProj = normalizePath(p.path).toLowerCase();
+          return norm.toLowerCase().startsWith(normProj + "/");
+        })?.id;
 
       if (targetProjectId) {
         const project = get().projects.find((p) => p.id === targetProjectId);
@@ -251,27 +714,44 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
         projectId: targetProjectId,
       };
 
-      set((state) => ({
-        openTabs: [...state.openTabs, newTab],
-        activeFilePath: filePath,
-        statusMessage: `Opened ${fileName}`,
-      }));
+      set((state) => {
+        // Double-check deduplication: if tab was opened while reading content
+        const alreadyOpen = state.openTabs.some((t) => normalizePath(t.path) === norm);
+        if (alreadyOpen) {
+          return { activeFilePath: filePath, statusMessage: `Opened ${fileName}` };
+        }
+        return {
+          openTabs: [...state.openTabs, newTab],
+          activeFilePath: filePath,
+          statusMessage: `Opened ${fileName}`,
+        };
+      });
     } catch (err) {
       console.error(`Failed to read file ${filePath}:`, err);
       set({ statusMessage: `Failed to open file: ${String(err)}` });
+    } finally {
+      inFlightOpeningFiles.delete(norm);
     }
   },
 
-  closeTab: (filePath: string) => {
-    const norm = normalizePath(filePath);
+  closeTab: (tabIdOrPath: string) => {
+    const norm = normalizePath(tabIdOrPath);
     const currentTabs = get().openTabs;
-    const tabIndex = currentTabs.findIndex((t) => normalizePath(t.path) === norm);
+    const tabIndex = currentTabs.findIndex(
+      (t) => t.id === tabIdOrPath || normalizePath(t.path) === norm
+    );
     if (tabIndex === -1) return;
 
-    const remaining = currentTabs.filter((t) => normalizePath(t.path) !== norm);
+    // Remove only the single target tab by index to prevent closing all duplicates if any exist
+    const remaining = currentTabs.filter((_, idx) => idx !== tabIndex);
+    const closedTab = currentTabs[tabIndex];
     let nextActive = get().activeFilePath;
 
-    if (get().activeFilePath && normalizePath(get().activeFilePath!) === norm) {
+    if (
+      get().activeFilePath &&
+      (normalizePath(get().activeFilePath!) === normalizePath(closedTab.path) ||
+        get().activeFilePath === closedTab.id)
+    ) {
       if (remaining.length > 0) {
         const nextIndex = Math.min(tabIndex, remaining.length - 1);
         nextActive = remaining[nextIndex].path;
@@ -286,9 +766,11 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
     });
   },
 
-  closeOtherTabs: (filePath: string) => {
-    const norm = normalizePath(filePath);
-    const target = get().openTabs.find((t) => normalizePath(t.path) === norm);
+  closeOtherTabs: (tabIdOrPath: string) => {
+    const norm = normalizePath(tabIdOrPath);
+    const target = get().openTabs.find(
+      (t) => t.id === tabIdOrPath || normalizePath(t.path) === norm
+    );
     if (!target) return;
     set({
       openTabs: [target],
@@ -296,10 +778,12 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
     });
   },
 
-  closeTabsToTheRight: (filePath: string) => {
-    const norm = normalizePath(filePath);
+  closeTabsToTheRight: (tabIdOrPath: string) => {
+    const norm = normalizePath(tabIdOrPath);
     const currentTabs = get().openTabs;
-    const tabIndex = currentTabs.findIndex((t) => normalizePath(t.path) === norm);
+    const tabIndex = currentTabs.findIndex(
+      (t) => t.id === tabIdOrPath || normalizePath(t.path) === norm
+    );
     if (tabIndex === -1) return;
     const remaining = currentTabs.slice(0, tabIndex + 1);
     let nextActive = get().activeFilePath;
@@ -380,7 +864,6 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
         statusMessage: `Saved ${tab.name}`,
       }));
 
-      // Refresh git status immediately on file save
       get().refreshGitStatus();
 
       setTimeout(() => {
@@ -402,8 +885,7 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
   },
 
   setSidebarWidth: (width: number) => {
-    // Clamp between 180 and 600 px
-    const clamped = Math.max(180, Math.min(600, width));
+    const clamped = Math.max(200, Math.min(650, width));
     set({ sidebarWidth: clamped });
   },
 

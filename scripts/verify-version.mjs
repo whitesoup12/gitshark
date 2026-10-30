@@ -103,7 +103,56 @@ if (uniqueVersions.length > 1) {
 
 const currentVersion = uniqueVersions[0];
 
-// 3. Check if the current version tag has already been released in Git
+// 3. Verify changelog contains an entry for the current version for the "What's New" modal
+const changelogPath = path.join(rootDir, "src", "data", "changelog.ts");
+if (!fs.existsSync(changelogPath)) {
+  console.error(`\n❌ CHANGELOG MISSING: Expected changelog at ${changelogPath}\n`);
+  process.exit(1);
+}
+
+const changelogContent = fs.readFileSync(changelogPath, "utf8");
+const hasVersionEntry = new RegExp(`version:\\s*["']${currentVersion}["']`).test(changelogContent);
+
+if (!hasVersionEntry) {
+  console.error(`
+================================================================================
+🚨 GIT PRE-PUSH ERROR: CHANGELOG NOT UPDATED FOR v${currentVersion}!
+================================================================================
+The version was bumped to "${currentVersion}", but "src/data/changelog.ts"
+does NOT have a release note entry for version "${currentVersion}"!
+
+GitShark shows a "What's New" modal on first launch of each new version,
+which requires release notes to be documented in src/data/changelog.ts.
+
+👉 HOW TO FIX:
+   1. Open src/data/changelog.ts
+   2. Add an entry at the top of CHANGELOG for v${currentVersion}:
+      {
+        version: "${currentVersion}",
+        date: "${new Date().toISOString().slice(0, 10)}",
+        title: "Release Title",
+        summary: "Summary of changes...",
+        whatsNew: [
+          "Feature description...",
+        ],
+        fixes: [
+          "Bug fix description...",
+        ],
+        improvements: [
+          "Improvement description...",
+        ],
+      },
+   3. Commit the changelog and push:
+      git commit -am "docs(changelog): update release notes for v${currentVersion}"
+      git push
+
+(To bypass this check in an emergency, use: git push --no-verify)
+================================================================================
+`);
+  process.exit(1);
+}
+
+// 4. Check if the current version tag has already been released in Git
 const tagName = `v${currentVersion}`;
 const tagCommit = runGit(`rev-list -n 1 refs/tags/${tagName}`);
 
@@ -144,5 +193,5 @@ If you push now, your release will collide with the existing "${tagName}" releas
   }
 }
 
-console.log(`✔ Version verification passed: v${currentVersion} (all ${Object.keys(versions).length} files synchronized)`);
+console.log(`✔ Version verification passed: v${currentVersion} (all ${Object.keys(versions).length} files synchronized & changelog verified)`);
 process.exit(0);

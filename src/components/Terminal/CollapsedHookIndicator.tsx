@@ -8,13 +8,16 @@ import {
   Terminal as TerminalIcon,
   X,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface CollapsedHookIndicatorProps {
   tab: Tab;
+  className?: string;
 }
 
 export const CollapsedHookIndicator: React.FC<CollapsedHookIndicatorProps> = ({
   tab,
+  className,
 }) => {
   const { toggleTerminal, dismissHookStatus } = useWorkspaceStore();
 
@@ -35,7 +38,7 @@ export const CollapsedHookIndicator: React.FC<CollapsedHookIndicatorProps> = ({
       : "Commit";
 
   return (
-    <div className="absolute bottom-3 right-4 z-20 flex items-center shadow-lg rounded-lg border overflow-hidden text-xs backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div className={cn("flex items-center shadow-lg rounded-lg border overflow-hidden text-xs backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-200", className)}>
       <button
         onClick={() => toggleTerminal(tab.id)}
         className={`flex items-center gap-2 px-3 py-1.5 transition-colors ${

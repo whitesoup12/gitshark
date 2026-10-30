@@ -14,6 +14,9 @@ import { FileBlameModal } from "@/components/blame/FileBlameModal";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { useUpdateStore } from "@/store/useUpdateStore";
 import { launchOrFocusCodeShark } from "@/lib/ipc";
+import { ChumFrenzyOverlay } from "@/components/chum/ChumFrenzyOverlay";
+import { WhatsNewModal } from "@/components/modals/WhatsNewModal";
+import { useChangelogStore } from "@/store/useChangelogStore";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId, initWorkspaceSession } = useWorkspaceStore();
@@ -27,6 +30,7 @@ export const App: React.FC = () => {
     initSharkStats();
     initWorkspaceSession();
     useUpdateStore.getState().checkForUpdates();
+    useChangelogStore.getState().checkFirstLaunchForVersion();
   }, [initSettings, initSharkStats, initWorkspaceSession]);
 
   // Global keyboard shortcuts: Ctrl+, / Cmd+, for Settings, Escape to close
@@ -109,6 +113,9 @@ export const App: React.FC = () => {
       {/* Swimming Shark & Commit Bubble Celebration Overlay */}
       <SharkCelebrationOverlay />
 
+      {/* Interactive Chum Bucket Feeding Frenzy Overlay */}
+      <ChumFrenzyOverlay />
+
       {/* Global Dialog Host for styled alerts, confirms, and prompts */}
       <GlobalDialogHost />
 
@@ -117,6 +124,9 @@ export const App: React.FC = () => {
 
       {/* Global Interactive Blame & File History Inspector */}
       <FileBlameModal />
+
+      {/* Global "What's New" Release Notes Popup */}
+      <WhatsNewModal />
     </div>
   );
 };

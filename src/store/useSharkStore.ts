@@ -209,6 +209,7 @@ interface SharkStoreState {
     message?: string
   ) => void;
   dismissCelebration: () => void;
+  awardBonusXp: (amount: number, reason?: string) => void;
 }
 
 export const useSharkStore = create<SharkStoreState>((set, get) => {
@@ -410,6 +411,12 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
 
     dismissCelebration: () => {
       set({ activeCelebration: null });
+    },
+
+    awardBonusXp: (amount: number, reason = "Bonus XP") => {
+      // Commits count 1:1 for XP in computeSharkRank
+      get().recordSharkStat("commit", amount);
+      get().triggerCelebration("frenzy", `🎰 ${reason} (+${amount} XP!)`);
     },
   };
 });

@@ -36,7 +36,7 @@ export const TabItem: React.FC<TabItemProps> = ({
       onAuxClick={handleAuxClick}
       data-active-tab={isActive ? "true" : undefined}
       className={cn(
-        "group relative flex items-center gap-2 px-3 py-1.5 h-9 max-w-[220px] min-w-[130px] flex-shrink-0 cursor-pointer text-xs font-medium border-r border-shark-800 transition-colors select-none",
+        "group relative flex items-center gap-2 px-3 py-1.5 h-full max-w-[220px] min-w-[130px] flex-shrink-0 cursor-pointer text-xs font-medium border-r border-shark-800 transition-colors select-none",
         isActive
           ? "bg-shark-900 text-slate-100 shadow-sm"
           : "bg-shark-950/70 text-slate-400 hover:bg-shark-900/60 hover:text-slate-200"

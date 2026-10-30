@@ -7,6 +7,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronRight,
+  Search,
 } from "lucide-react";
 import { useCodeSharkStore } from "../store/useCodeSharkStore";
 import { pickDirectory, pickFile } from "@/lib/ipc";
@@ -22,6 +23,8 @@ export const CodeSharkHeader: React.FC = () => {
     activeFilePath,
     isSaving,
     projects,
+    setSidebarTab,
+    openQuickOpen,
   } = useCodeSharkStore();
 
   const activeTab = openTabs.find((t) => t.path === activeFilePath);
@@ -39,6 +42,11 @@ export const CodeSharkHeader: React.FC = () => {
     if (file) {
       await openTarget(file);
     }
+  };
+
+  const handleOpenSearch = () => {
+    if (!sidebarOpen) toggleSidebar();
+    setSidebarTab("search");
   };
 
   return (
@@ -61,9 +69,22 @@ export const CodeSharkHeader: React.FC = () => {
           </span>
         </div>
 
+        {/* Quick Open Search Pill in Header */}
+        <button
+          onClick={openQuickOpen}
+          title="Quick Open File (Ctrl+P)"
+          className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 text-xs rounded-md bg-shark-950/70 hover:bg-shark-800 text-shark-400 hover:text-shark-200 border border-shark-800 transition-colors ml-2"
+        >
+          <Search className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="text-[11px]">Go to File...</span>
+          <kbd className="text-[10px] font-mono bg-shark-900 px-1 py-0.2 rounded border border-shark-800 text-shark-400 ml-1">
+            Ctrl+P
+          </kbd>
+        </button>
+
         {/* Breadcrumb Path */}
         {(activeProject || activeTab) && (
-          <div className="hidden sm:flex items-center space-x-1 text-xs text-shark-400 pl-3 border-l border-shark-800">
+          <div className="hidden lg:flex items-center space-x-1 text-xs text-shark-400 pl-3 border-l border-shark-800">
             {activeProject && (
               <>
                 <span className="text-shark-300 font-medium">{activeProject.name}</span>
@@ -82,6 +103,15 @@ export const CodeSharkHeader: React.FC = () => {
 
       {/* Right: Actions */}
       <div className="flex items-center space-x-1.5">
+        <button
+          onClick={handleOpenSearch}
+          title="Search across all files (Ctrl+Shift+F)"
+          className="flex items-center space-x-1 px-2.5 py-1 text-xs rounded bg-shark-800/80 hover:bg-shark-700/80 text-shark-200 hover:text-white transition-colors border border-shark-700/40"
+        >
+          <Search className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="hidden md:inline">Find in Files</span>
+        </button>
+
         <button
           onClick={handlePickDirectory}
           title="Add Folder to Workspace"
@@ -108,11 +138,11 @@ export const CodeSharkHeader: React.FC = () => {
             className={`flex items-center space-x-1 px-2.5 py-1 text-xs rounded transition-colors border ${
               activeTab.isDirty
                 ? "bg-cyan-600 hover:bg-cyan-500 text-white border-cyan-400 shadow-sm"
-                : "bg-shark-800/50 text-shark-500 border-transparent cursor-default"
+                : "bg-shark-800/50 text-shark-500 border-shark-700/30 cursor-not-allowed"
             }`}
           >
-            <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
-            <span>Save</span>
+            <Save className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isSaving ? "Saving..." : "Save"}</span>
           </button>
         )}
       </div>

@@ -12,16 +12,18 @@ import {
 import type { FileTreeNode } from "@/types";
 import { useCodeSharkStore } from "../store/useCodeSharkStore";
 import { normalizePath } from "../utils/language";
+import type { FileContextMenuTarget } from "./CodeSharkFileContextMenu";
 
 interface FileTreeItemProps {
   node: FileTreeNode;
   depth: number;
   projectId?: string;
+  onContextMenu?: (target: FileContextMenuTarget, e: React.MouseEvent) => void;
 }
 
 function getFileIcon(filename: string, gitStatus?: string) {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  
+
   if (gitStatus === "modified") {
     return <FileCode className="w-3.5 h-3.5 text-amber-400 shrink-0" />;
   }
@@ -60,7 +62,12 @@ function getFileIcon(filename: string, gitStatus?: string) {
   }
 }
 
-export const FileTreeItem: React.FC<FileTreeItemProps> = ({ node, depth, projectId }) => {
+export const FileTreeItem: React.FC<FileTreeItemProps> = ({
+  node,
+  depth,
+  projectId,
+  onContextMenu,
+}) => {
   const {
     projects,
     projectGitStatus,
@@ -116,10 +123,27 @@ export const FileTreeItem: React.FC<FileTreeItemProps> = ({ node, depth, project
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onContextMenu) {
+      onContextMenu(
+        {
+          path: node.path,
+          name: node.name,
+          isDir: node.isDir,
+          projectId,
+        },
+        e
+      );
+    }
+  };
+
   return (
     <div className="select-none text-xs">
       <div
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${depth * 14 + 10}px` }}
         className={`flex items-center space-x-1.5 py-1 pr-2 cursor-pointer transition-colors ${
           isActive
@@ -207,6 +231,7 @@ export const FileTreeItem: React.FC<FileTreeItemProps> = ({ node, depth, project
                 node={child}
                 depth={depth + 1}
                 projectId={projectId}
+                onContextMenu={onContextMenu}
               />
             ))
           ) : !isLoading ? (

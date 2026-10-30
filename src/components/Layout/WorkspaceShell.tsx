@@ -5,7 +5,7 @@ import { MainViewport } from "@/components/Viewport/MainViewport";
 import { TerminalDrawer } from "@/components/Terminal/TerminalDrawer";
 import { CollapsedHookIndicator } from "@/components/Terminal/CollapsedHookIndicator";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, Terminal as TerminalIcon } from "lucide-react";
 
 interface WorkspaceShellProps {
   tab: Tab;
@@ -125,8 +125,29 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ tab }) => {
         />
       )}
 
-      {/* Subtle indicator when drawer is collapsed */}
-      <CollapsedHookIndicator tab={tab} />
+      {/* Bottom-Right Floating Terminal Toggle Dock */}
+      <div className="absolute bottom-3 right-4 z-30 flex items-center gap-2 pointer-events-auto select-none">
+        <CollapsedHookIndicator tab={tab} />
+        <button
+          onClick={() => toggleTerminal(tab.id)}
+          className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-mono transition-all shadow-lg border backdrop-blur-md cursor-pointer group ${
+            tab.terminalOpen
+              ? "bg-sky-950/95 border-sky-500/70 text-sky-200 hover:bg-sky-900 shadow-[0_0_12px_rgba(14,165,233,0.3)]"
+              : "bg-shark-900/95 border-shark-750 text-slate-300 hover:text-white hover:bg-shark-850 hover:border-sky-500/40"
+          }`}
+          title="Toggle Integrated Terminal Drawer (`)"
+        >
+          <TerminalIcon
+            className={`w-3.5 h-3.5 text-sky-400 group-hover:scale-110 transition-transform ${
+              tab.terminalOpen ? "animate-pulse" : ""
+            }`}
+          />
+          <span className="font-sans font-medium text-[11px]">Terminal</span>
+          <kbd className="text-[10px] font-mono px-1 py-0.2 rounded bg-shark-800 border border-shark-700 text-slate-400 group-hover:text-slate-300">
+            `
+          </kbd>
+        </button>
+      </div>
     </div>
   );
 };

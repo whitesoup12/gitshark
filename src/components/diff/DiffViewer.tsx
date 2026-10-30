@@ -60,6 +60,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Map of hunkIdx -> Set of selected lineIdx within hunk.lines
   const [selectedLines, setSelectedLines] = useState<Map<number, Set<number>>>(new Map());
   const [lastSelected, setLastSelected] = useState<{ hunkIdx: number; lineIdx: number } | null>(null);
+  const [isOpeningCodeShark, setIsOpeningCodeShark] = useState(false);
 
   // Clear selection whenever file path or staging state changes
   useEffect(() => {
@@ -375,16 +376,25 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 <span>History</span>
               </button>
               <button
-                onClick={() => {
-                  const tab = useWorkspaceStore
-                    .getState()
-                    .tabs.find((t) => t.id === tabId || t.repoId === repoId);
-                  const fullPath = tab?.path
-                    ? `${tab.path}/${filePath}`.replace(/\/+/g, "/")
-                    : filePath;
-                  launchOrFocusCodeShark(fullPath || undefined);
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (isOpeningCodeShark) return;
+                  setIsOpeningCodeShark(true);
+                  try {
+                    const tab = useWorkspaceStore
+                      .getState()
+                      .tabs.find((t) => t.id === tabId || t.repoId === repoId);
+                    const fullPath = tab?.path
+                      ? `${tab.path}/${filePath}`.replace(/\/+/g, "/")
+                      : filePath;
+                    await launchOrFocusCodeShark(fullPath || undefined);
+                  } finally {
+                    setTimeout(() => setIsOpeningCodeShark(false), 600);
+                  }
                 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-slate-400 hover:text-cyan-300 hover:bg-shark-800/60 transition-colors"
+                disabled={isOpeningCodeShark}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs text-slate-400 hover:text-cyan-300 hover:bg-shark-800/60 disabled:opacity-50 transition-colors"
                 title="Edit this file in CodeShark IDE"
               >
                 <Code className="w-3.5 h-3.5 text-cyan-400" />

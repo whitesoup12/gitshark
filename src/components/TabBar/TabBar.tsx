@@ -1,22 +1,22 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { TabItem } from "./TabItem";
 import {
-  Terminal as TerminalIcon,
   Download,
-  Globe,
-  GitPullRequest,
   Search,
   ChevronLeft,
   ChevronRight,
   Code,
+  Settings,
+  Plus,
 } from "lucide-react";
-import { SyncButton } from "./SyncButton";
 import { OpenRepoDropdown } from "./OpenRepoDropdown";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
 import { useSharkStore, computeSharkRank } from "@/store/useSharkStore";
 import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
-import { openInBrowserIpc, launchOrFocusCodeShark } from "@/lib/ipc";
+import { launchOrFocusCodeShark, pickRepositoryDirectory } from "@/lib/ipc";
+import { ChumBucketButton } from "@/components/chum/ChumBucketButton";
 
 export const TabBar: React.FC = () => {
   const {
@@ -24,10 +24,8 @@ export const TabBar: React.FC = () => {
     activeTabId,
     setActiveTab,
     closeTab,
-    toggleTerminal,
     setCloneModalOpen,
-    openRepoInBrowser,
-    createPullRequestInBrowser,
+    openRepositoryTab,
   } = useWorkspaceStore();
   const { openWisdom, stats } = useSharkStore();
   const rankInfo = computeSharkRank(stats);
@@ -108,172 +106,158 @@ export const TabBar: React.FC = () => {
   };
 
   return (
-    <header className="flex items-center justify-between bg-shark-950 border-b border-shark-800 h-10 select-none px-2 z-20 gap-2 w-full overflow-hidden">
-      {/* Left side: Logo + Scrollable tabs strip */}
-      <div className="flex items-center h-full flex-1 min-w-0">
-        {/* App Logo / Mark + Shark Rank Pill */}
-        <button
-          onClick={() => openWisdom()}
-          className="flex items-center gap-2 px-2.5 py-1 font-bold tracking-tight text-sm select-none border-r border-shark-800 mr-1 flex-shrink-0 group cursor-pointer hover:bg-shark-900/60 rounded transition-all text-left"
-          title={`GitShark — ${rankInfo.emoji} ${rankInfo.title} (Lv.${rankInfo.level} • ${rankInfo.totalScore} XP) — Click for GitShark Companion & Stats`}
-        >
-          <GitSharkLogo size="sm" withBackground={false} withGlow={true} className="transition-transform group-hover:scale-110 group-hover:rotate-6 duration-200" />
-          <span className="bg-gradient-to-r from-sky-400 via-teal-300 to-sky-200 bg-clip-text text-transparent font-extrabold tracking-wide">
-            GitShark
-          </span>
-          <span
-            className={`hidden md:inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded border ${rankInfo.badgeClass}`}
-          >
-            <span>{rankInfo.emoji}</span>
-            <span>Lv.{rankInfo.level}</span>
-          </span>
-        </button>
-
-        {/* Scroll Left Chevron Button */}
-        {canScrollLeft && (
+    <div className="flex flex-col w-full select-none z-20 flex-shrink-0">
+      {/* Tier 1: Global Application Header */}
+      <header className="flex items-center justify-between bg-shark-950 border-b border-shark-800/80 h-9 px-3 gap-3 w-full">
+        {/* Left: App Logo + Shark Companion Level Badge */}
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
-            onClick={() => scrollTabs("left")}
-            className="flex items-center justify-center w-5 h-7 flex-shrink-0 bg-shark-900 hover:bg-shark-800 text-slate-400 hover:text-slate-100 border border-shark-750 rounded-l transition-all shadow-sm z-10 mr-0.5"
-            title="Scroll tabs left"
-            aria-label="Scroll tabs left"
+            onClick={() => openWisdom()}
+            className="flex items-center gap-2 px-2 py-1 font-bold tracking-tight text-sm select-none group cursor-pointer hover:bg-shark-900/70 rounded-md transition-all text-left"
+            title={`GitShark — ${rankInfo.emoji} ${rankInfo.title} (Lv.${rankInfo.level} • ${rankInfo.totalScore} XP) — Click for GitShark Companion & Stats`}
           >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-        )}
-
-        {/* Tab Items List (horizontally scrollable with mouse wheel or chevrons) */}
-        <div
-          ref={tabsScrollRef}
-          className="flex items-center h-full overflow-x-auto no-scrollbar scroll-smooth flex-1 min-w-0"
-        >
-          {tabs.map((tab) => (
-            <TabItem
-              key={tab.id}
-              tab={tab}
-              isActive={tab.id === activeTabId}
-              onSelect={() => setActiveTab(tab.id)}
-              onClose={() => closeTab(tab.id)}
+            <GitSharkLogo
+              size="sm"
+              withBackground={false}
+              withGlow={true}
+              className="transition-transform group-hover:scale-110 group-hover:rotate-6 duration-200"
             />
-          ))}
+            <span className="bg-gradient-to-r from-sky-400 via-teal-300 to-sky-200 bg-clip-text text-transparent font-extrabold tracking-wide">
+              GitShark
+            </span>
+            <span
+              className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded border ${rankInfo.badgeClass}`}
+            >
+              <span>{rankInfo.emoji}</span>
+              <span>Lv.{rankInfo.level}</span>
+            </span>
+          </button>
         </div>
 
-        {/* Scroll Right Chevron Button */}
-        {canScrollRight && (
+        {/* Center: Centered Command Palette Search Bar + Chum Bucket */}
+        <div className="flex-1 max-w-lg flex items-center justify-center gap-2">
           <button
-            onClick={() => scrollTabs("right")}
-            className="flex items-center justify-center w-5 h-7 flex-shrink-0 bg-shark-900 hover:bg-shark-800 text-slate-400 hover:text-slate-100 border border-shark-750 rounded-r transition-all shadow-sm z-10 ml-0.5"
-            title="Scroll tabs right"
-            aria-label="Scroll tabs right"
+            onClick={() => useCommandPaletteStore.getState().open()}
+            className="w-full max-w-sm flex items-center justify-between h-7 px-3 rounded-md bg-shark-900/90 hover:bg-shark-850 border border-shark-800 hover:border-sky-500/40 text-slate-400 hover:text-slate-200 transition-all text-xs shadow-inner group"
+            title="Open Command Palette (Cmd+K / Ctrl+P)"
           >
-            <ChevronRight className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-2 truncate">
+              <Search className="w-3.5 h-3.5 text-sky-400 group-hover:text-sky-300 transition-colors" />
+              <span className="text-[11px] text-slate-400 group-hover:text-slate-300 font-normal truncate">
+                Search commands, repos, branches...
+              </span>
+            </div>
+            <kbd className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-shark-800 border border-shark-700/80 text-slate-400 group-hover:text-slate-300 shadow-sm ml-2">
+              ⌘K
+            </kbd>
           </button>
-        )}
 
-        {/* Fixed Action Controls */}
-        <div className="flex items-center flex-shrink-0 ml-1">
+          {/* Interactive Chum Bucket Button! */}
+          <ChumBucketButton />
+        </div>
+
+        {/* Right: Global Actions & Tools */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {/* Open Repository Dropdown */}
           <OpenRepoDropdown />
 
           {/* Clone Repository Button */}
           <button
             onClick={() => setCloneModalOpen(true)}
-            className="flex items-center gap-1 h-7 px-2 ml-1 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-850 text-xs transition-colors border border-transparent hover:border-shark-750 flex-shrink-0"
+            className="flex items-center gap-1.5 h-7 px-2.5 rounded text-xs text-slate-300 hover:text-white hover:bg-shark-850 border border-shark-800 hover:border-shark-700 transition-colors shadow-sm"
             title="Clone Remote Repository"
           >
             <Download className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">Clone</span>
+            <span className="hidden md:inline font-medium text-[11px]">Clone</span>
           </button>
 
           {/* CodeShark IDE Launcher Button */}
           <button
             onClick={() => launchOrFocusCodeShark(activeTab?.path || undefined)}
-            className="flex items-center gap-1 h-7 px-2 ml-1 rounded text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/50 text-xs transition-colors border border-transparent hover:border-cyan-800/60 flex-shrink-0"
+            className="flex items-center gap-1.5 h-7 px-2.5 rounded text-xs text-cyan-300 hover:text-cyan-100 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 hover:border-cyan-700 transition-colors shadow-sm"
             title={activeTab ? "Open Repository in CodeShark IDE (Ctrl+Alt+C)" : "Open CodeShark IDE (Ctrl+Alt+O)"}
           >
             <Code className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden lg:inline text-[11px] font-medium">CodeShark</span>
+            <span className="font-semibold text-[11px]">CodeShark</span>
+          </button>
+
+          <div className="h-4 w-[1px] bg-shark-800 mx-0.5" />
+
+          {/* Global Settings & Appearance */}
+          <button
+            onClick={() => useSettingsStore.getState().openSettings("appearance")}
+            className="flex items-center justify-center w-7 h-7 rounded text-slate-400 hover:text-slate-100 hover:bg-shark-850 border border-shark-800 hover:border-shark-700 transition-colors shadow-sm"
+            title="Settings & Appearance (Ctrl+,)"
+          >
+            <Settings className="w-3.5 h-3.5" />
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Middle: Command Palette Quick Search Launcher */}
-      <button
-        onClick={() => useCommandPaletteStore.getState().open()}
-        className="hidden xl:flex items-center gap-2 h-7 px-2.5 rounded-md bg-shark-900/90 hover:bg-shark-850 border border-shark-800 hover:border-shark-700 text-slate-400 hover:text-slate-200 transition-all text-xs mx-2 shadow-sm flex-shrink-0"
-        title="Open Command Palette (Cmd+K / Ctrl+P)"
-      >
-        <Search className="w-3.5 h-3.5 text-sky-400" />
-        <span className="text-[11px] text-slate-400 font-normal">Search or jump to...</span>
-        <kbd className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-shark-800 border border-shark-700 text-slate-400">
-          ⌘K
-        </kbd>
-      </button>
-
-      {/* Right side: Global utility toggles for active tab */}
-      {activeTab && (
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Ahead/Behind Sync Button */}
-          <SyncButton key={activeTab.id} tab={activeTab} />
-
-          {/* Open in Browser Shortcut Button */}
-          <button
-            onClick={() => openRepoInBrowser(activeTab.id)}
-            className="flex items-center gap-1.5 h-7 px-2 rounded text-xs border border-shark-800 text-slate-400 hover:text-sky-300 hover:border-sky-800/60 hover:bg-shark-850 transition-colors"
-            title="Open Repository in Browser (Ctrl+Shift+B / Cmd+Shift+B)"
-          >
-            <Globe className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden md:inline text-[11px]">Browser</span>
-          </button>
-
-          {/* Create or Open Pull Request Button */}
-          {(() => {
-            const currentBranchName = activeTab.metadata?.current_branch;
-            const activeBranchPr = currentBranchName
-              ? (activeTab.pullRequests || []).find((pr) => pr.source_branch === currentBranchName)
-              : null;
-
-            return (
+      {/* Tier 2: Repository Workspace Tab Strip (Rendered whenever repositories are open) */}
+      {tabs.length > 0 && (
+        <nav
+          aria-label="Repository tabs"
+          className="flex items-center justify-between bg-shark-950/90 border-b border-shark-800 h-8 px-2 gap-2 w-full overflow-hidden"
+        >
+          {/* Left side: Scrollable tabs strip + Add Repo quick button */}
+          <div className="flex items-center h-full flex-1 min-w-0">
+            {/* Scroll Left Chevron */}
+            {canScrollLeft && (
               <button
-                onClick={() => {
-                  if (activeBranchPr) {
-                    openInBrowserIpc(activeBranchPr.url);
-                  } else {
-                    createPullRequestInBrowser(activeTab.id);
-                  }
-                }}
-                className={`flex items-center gap-1.5 h-7 px-2 rounded text-xs border transition-colors ${
-                  activeBranchPr
-                    ? "border-emerald-700/60 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 hover:border-emerald-600 shadow-sm"
-                    : "border-shark-800 text-slate-400 hover:text-emerald-300 hover:border-emerald-800/60 hover:bg-shark-850"
-                }`}
-                title={
-                  activeBranchPr
-                    ? `Pull Request #${activeBranchPr.number}: ${activeBranchPr.title}${activeBranchPr.is_draft ? " (Draft)" : ""} — Click to open in browser`
-                    : "Create Pull Request in Browser (Ctrl+Shift+P / Cmd+Shift+P)"
-                }
+                onClick={() => scrollTabs("left")}
+                className="flex items-center justify-center w-5 h-6 flex-shrink-0 bg-shark-900 hover:bg-shark-800 text-slate-400 hover:text-slate-100 border border-shark-750 rounded-l transition-all shadow-sm z-10 mr-0.5"
+                title="Scroll tabs left"
+                aria-label="Scroll tabs left"
               >
-                <GitPullRequest className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden md:inline text-[11px] font-medium">
-                  {activeBranchPr ? `PR #${activeBranchPr.number}` : "New PR"}
-                </span>
+                <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-            );
-          })()}
+            )}
 
-          <button
-            onClick={() => toggleTerminal(activeTab.id)}
-            className={`flex items-center gap-1.5 h-7 px-2.5 rounded text-xs transition-colors border ${
-              activeTab.terminalOpen
-                ? "bg-shark-800 border-sky-500/50 text-sky-300"
-                : "border-shark-800 text-slate-400 hover:text-slate-200 hover:bg-shark-850"
-            }`}
-            title="Toggle PTY Terminal Drawer (`)"
-          >
-            <TerminalIcon className="w-3.5 h-3.5" />
-            <span className="text-[11px] font-mono">Terminal</span>
-          </button>
-        </div>
+            {/* Horizontally scrollable Tab Items */}
+            <div
+              ref={tabsScrollRef}
+              className="flex items-center h-full overflow-x-auto no-scrollbar scroll-smooth flex-1 min-w-0"
+            >
+              {tabs.map((tab) => (
+                <TabItem
+                  key={tab.id}
+                  tab={tab}
+                  isActive={tab.id === activeTabId}
+                  onSelect={() => setActiveTab(tab.id)}
+                  onClose={() => closeTab(tab.id)}
+                />
+              ))}
+            </div>
+
+            {/* Scroll Right Chevron */}
+            {canScrollRight && (
+              <button
+                onClick={() => scrollTabs("right")}
+                className="flex items-center justify-center w-5 h-6 flex-shrink-0 bg-shark-900 hover:bg-shark-800 text-slate-400 hover:text-slate-100 border border-shark-750 rounded-r transition-all shadow-sm z-10 ml-0.5"
+                title="Scroll tabs right"
+                aria-label="Scroll tabs right"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Add New Repository Quick Plus Button */}
+            <button
+              onClick={async () => {
+                const picked = await pickRepositoryDirectory();
+                if (picked) {
+                  openRepositoryTab(picked);
+                }
+              }}
+              className="flex items-center justify-center w-6 h-6 ml-1 my-auto rounded text-slate-400 hover:text-sky-300 hover:bg-shark-900 transition-colors border border-transparent hover:border-shark-800 flex-shrink-0"
+              title="Open another repository..."
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </nav>
       )}
-    </header>
+    </div>
   );
 };

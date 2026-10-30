@@ -22,6 +22,11 @@ import type {
   FileBlameData,
   FileHistoryItem,
   BranchComparisonDetails,
+  WorkspaceContentMatch,
+  SearchWorkspaceContentOptions,
+  WorkspaceReplaceOptions,
+  WorkspaceReplaceSummary,
+  WorkspaceFileMatch,
 } from "@/types";
 import { showPrompt } from "@/store/useDialogStore";
 
@@ -1962,7 +1967,100 @@ export async function getFileGitHeadContentIpc(dirPath: string, filePath: string
   }
 }
 
+/**
+ * Create a new file for CodeShark
+ */
+export async function createCodeSharkFileIpc(filePath: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info(`[Mock] Created file ${filePath}`);
+    return;
+  }
+  await invoke("create_codeshark_file", { filePath });
+}
 
+/**
+ * Create a new directory for CodeShark
+ */
+export async function createCodeSharkDirIpc(dirPath: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info(`[Mock] Created directory ${dirPath}`);
+    return;
+  }
+  await invoke("create_codeshark_dir", { dirPath });
+}
 
+/**
+ * Rename a file or directory in CodeShark
+ */
+export async function renameCodeSharkPathIpc(oldPath: string, newPath: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info(`[Mock] Renamed ${oldPath} to ${newPath}`);
+    return;
+  }
+  await invoke("rename_codeshark_path", { oldPath, newPath });
+}
 
+/**
+ * Delete a file or directory in CodeShark
+ */
+export async function deleteCodeSharkPathIpc(targetPath: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info(`[Mock] Deleted ${targetPath}`);
+    return;
+  }
+  await invoke("delete_codeshark_path", { targetPath });
+}
+
+/**
+ * Reveal file or directory in OS File Manager (Explorer/Finder)
+ */
+export async function revealInFileManagerIpc(targetPath: string): Promise<void> {
+  if (!isTauriEnvironment()) {
+    console.info(`[Mock] Revealed ${targetPath} in file manager`);
+    return;
+  }
+  await invoke("reveal_in_file_manager", { targetPath });
+}
+
+/**
+ * Search workspace content across project roots
+ */
+export async function searchWorkspaceContentIpc(
+  options: SearchWorkspaceContentOptions
+): Promise<WorkspaceContentMatch[]> {
+  if (!isTauriEnvironment()) {
+    return [];
+  }
+  return await invoke<WorkspaceContentMatch[]>("search_workspace_content", { options });
+}
+
+/**
+ * Replace workspace content across project roots
+ */
+export async function replaceWorkspaceContentIpc(
+  options: WorkspaceReplaceOptions
+): Promise<WorkspaceReplaceSummary> {
+  if (!isTauriEnvironment()) {
+    return { files_modified: 0, occurrences_replaced: 0, modified_files: [] };
+  }
+  return await invoke<WorkspaceReplaceSummary>("replace_workspace_content", { options });
+}
+
+/**
+ * Search workspace file names across project roots
+ */
+export async function searchWorkspaceFilesIpc(
+  rootPaths: string[],
+  query: string,
+  maxResults?: number
+): Promise<WorkspaceFileMatch[]> {
+  if (!isTauriEnvironment()) {
+    return [];
+  }
+  return await invoke<WorkspaceFileMatch[]>("search_workspace_files", {
+    rootPaths,
+    query,
+    maxResults,
+  });
+}
 

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GitBinaryInfo, SettingsTab, PushTagsOption } from "@/types";
+import type { GitBinaryInfo, SettingsTab, PushTagsOption, ThemeId } from "@/types";
 import {
   getGitBinaryInfoIpc,
   setCustomGitPathIpc,
@@ -8,11 +8,19 @@ import {
   setDiffDebounceDelayIpc,
   pickDirectory,
 } from "@/lib/ipc";
+import {
+  applyTheme,
+  getSavedTheme,
+  broadcastThemeChange,
+  setupCrossWindowThemeSync,
+} from "@/lib/theme";
 
 const STORAGE_CUSTOM_GIT_PATH = "gitshark_custom_git_path";
 const STORAGE_DIFF_REFRESH_DELAY = "gitshark_diff_refresh_delay";
 const STORAGE_DEV_DIRECTORY = "gitshark_dev_directory";
 const STORAGE_PUSH_TAGS_OPTION = "gitshark_push_tags_option";
+
+let crossWindowSyncRegistered = false;
 
 interface SettingsState {
   isSettingsOpen: boolean;
@@ -26,6 +34,7 @@ interface SettingsState {
   diffRefreshDelayMs: number;
   devDirectory: string | null;
   pushTagsOption: PushTagsOption;
+  currentTheme: ThemeId;
 
   // Actions
   openSettings: (tab?: SettingsTab) => void;
@@ -35,6 +44,7 @@ interface SettingsState {
   setDiffRefreshDelayMs: (delayMs: number) => Promise<void>;
   setDevDirectory: (path: string | null) => void;
   setPushTagsOption: (option: PushTagsOption) => void;
+  setTheme: (theme: ThemeId, broadcast?: boolean) => void;
   browseForDevDirectory: () => Promise<string | null>;
   loadGitInfo: () => Promise<void>;
   browseForGitExecutable: () => Promise<void>;
@@ -56,6 +66,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   diffRefreshDelayMs: 1500,
   devDirectory: null,
   pushTagsOption: "follow-tags",
+  currentTheme: getSavedTheme(),
+
+  setTheme: (theme: ThemeId, broadcast = true) => {
+    applyTheme(theme);
+    set({ currentTheme: theme });
+    if (broadcast) {
+      broadcastThemeChange(theme);
+    }
+  },
 
   setDevDirectory: (path: string | null) => {
     const trimmed = path?.trim() || null;
@@ -104,13 +123,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setDiffRefreshDelayMs: async (delayMs: number) => {
-    const clamped = Math.max(200, Math.min(10000, delayMs));
-    localStorage.setItem(STORAGE_DIFF_REFRESH_DELAY, String(clamped));
-    set({ diffRefreshDelayMs: clamped });
     try {
-      await setDiffDebounceDelayIpc(clamped);
-    } catch (err) {
-      console.error("Failed to sync debounce delay to Tauri backend:", err);
+      localStorage.setItem(STORAGE_DIFF_REFRESH_DELAY, delayMs.toString());
+      set({ diffRefreshDelayMs: delayMs });
+      await setDiffDebounceDelayIpc(delayMs);
+    } catch (e) {
+      console.warn("Failed to set diff refresh delay:", e);
     }
   },
 
@@ -121,10 +139,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({
         gitInfo: info,
         customPathInput: info.is_custom ? info.current_path : "",
+        isLoadingGitInfo: false,
       });
     } catch (err) {
-      console.error("Failed to load Git binary information:", err);
-    } finally {
+      console.error("Failed to fetch Git info:", err);
       set({ isLoadingGitInfo: false });
     }
   },
@@ -133,8 +151,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const picked = await pickGitExecutable();
     if (picked) {
       set({ customPathInput: picked, testResult: null, saveMessage: null });
-      // Automatically test the newly picked executable
-      get().testPath(picked);
+      await get().testPath(picked);
     }
   },
 
@@ -142,49 +159,55 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const trimmed = path.trim();
     if (!trimmed) {
       set({
-        testResult: { valid: false, message: "Please specify a file path." },
+        testResult: {
+          valid: false,
+          message: "Please specify a path to the git executable",
+        },
       });
       return;
     }
 
     set({ isTestingPath: true, testResult: null });
     try {
-      const version = await validateGitPathIpc(trimmed);
+      const versionStr = await validateGitPathIpc(trimmed);
       set({
-        testResult: { valid: true, message: `Verified: ${version}` },
-      });
-    } catch (err) {
-      set({
+        isTestingPath: false,
         testResult: {
-          valid: false,
-          message: err instanceof Error ? err.message : String(err),
+          valid: true,
+          message: `Found: ${versionStr}`,
         },
       });
-    } finally {
-      set({ isTestingPath: false });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({
+        isTestingPath: false,
+        testResult: {
+          valid: false,
+          message: `Validation failed: ${msg}`,
+        },
+      });
     }
   },
 
   saveGitPath: async (customPath: string | null) => {
-    set({ saveMessage: null });
     try {
-      const trimmed = customPath?.trim() || null;
-      const updatedInfo = await setCustomGitPathIpc(trimmed);
-      if (trimmed) {
-        localStorage.setItem(STORAGE_CUSTOM_GIT_PATH, trimmed);
+      const pathArg = customPath?.trim() || null;
+      await setCustomGitPathIpc(pathArg);
+
+      if (pathArg) {
+        localStorage.setItem(STORAGE_CUSTOM_GIT_PATH, pathArg);
       } else {
         localStorage.removeItem(STORAGE_CUSTOM_GIT_PATH);
       }
+
+      await get().loadGitInfo();
       set({
-        gitInfo: updatedInfo,
-        customPathInput: updatedInfo.is_custom ? updatedInfo.current_path : "",
         saveMessage: {
           success: true,
-          message: updatedInfo.is_custom
-            ? `Successfully configured custom Git: ${updatedInfo.version || updatedInfo.current_path}`
-            : "Reset to auto-detected system Git.",
+          message: pathArg
+            ? "Custom Git path applied successfully"
+            : "Reset to auto-detected Git binary",
         },
-        testResult: null,
       });
       return true;
     } catch (err) {
@@ -205,6 +228,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   initSettings: async () => {
     try {
+      // Initialize active theme
+      const savedTheme = getSavedTheme();
+      applyTheme(savedTheme);
+      set({ currentTheme: savedTheme });
+
+      // Initialize cross-window theme listener if not already registered in this window
+      if (!crossWindowSyncRegistered) {
+        crossWindowSyncRegistered = true;
+        setupCrossWindowThemeSync((newTheme) => {
+          if (get().currentTheme !== newTheme) {
+            get().setTheme(newTheme, false);
+          }
+        });
+      }
+
       const savedCustomPath = localStorage.getItem(STORAGE_CUSTOM_GIT_PATH);
       if (savedCustomPath && savedCustomPath.trim().length > 0) {
         await setCustomGitPathIpc(savedCustomPath.trim());
