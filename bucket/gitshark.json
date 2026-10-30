@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/whitesoup12/gitshark/releases/download/v2.1.0/gitshark-v2.1.0-windows-x64-portable.zip",
-      "hash": "825f59e42e4212d3753a10debfc8f0a06d20ab0a4e121501133ead6785723261"
+      "hash": "6193d554e6a84cb7c5214b4de05711c076cae9dc9561e7729a1abc77b1fa8e8b"
     }
   },
   "bin": "gitshark.exe",
