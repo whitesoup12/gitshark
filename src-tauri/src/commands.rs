@@ -2391,6 +2391,8 @@ pub struct SharkStatsData {
     #[serde(default)]
     pub prs_opened: u64,
     #[serde(default)]
+    pub chum_jackpots: u64,
+    #[serde(default)]
     pub storage_path: String,
     #[serde(default)]
     pub exists: bool,
@@ -2474,6 +2476,7 @@ pub fn get_shark_stats() -> Result<SharkStatsData, String> {
         stashes_buried: 0,
         merges_to_main: 0,
         prs_opened: 0,
+        chum_jackpots: 0,
         storage_path: path_str,
         exists: false,
     })
@@ -3425,6 +3428,33 @@ mod tests {
         let path = resolve_shark_stats_path();
         assert!(path.to_string_lossy().contains(".gitshark"));
         assert!(path.to_string_lossy().ends_with("shark_stats.json"));
+    }
+
+    #[test]
+    fn test_shark_stats_chum_jackpots_serialization() {
+        // Test backwards compatibility when chum_jackpots is missing from older JSON
+        let legacy_json = r#"{"commits_swum":12,"changes_chomped":5,"pushes_launched":2,"stashes_buried":0}"#;
+        let parsed: SharkStatsData = serde_json::from_str(legacy_json).expect("should parse legacy stats");
+        assert_eq!(parsed.commits_swum, 12);
+        assert_eq!(parsed.chum_jackpots, 0);
+
+        // Test with chum_jackpots present
+        let stats = SharkStatsData {
+            commits_swum: 10,
+            changes_chomped: 4,
+            pushes_launched: 2,
+            stashes_buried: 1,
+            merges_to_main: 1,
+            prs_opened: 1,
+            chum_jackpots: 3,
+            storage_path: "~/.gitshark/shark_stats.json".to_string(),
+            exists: true,
+        };
+        let serialized = serde_json::to_string(&stats).expect("should serialize stats");
+        assert!(serialized.contains("\"chum_jackpots\":3"));
+        let deserialized: SharkStatsData = serde_json::from_str(&serialized).expect("should deserialize stats");
+        assert_eq!(deserialized.chum_jackpots, 3);
+        assert_eq!(deserialized.commits_swum, 10);
     }
 
     #[test]

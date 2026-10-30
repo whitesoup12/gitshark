@@ -14,6 +14,7 @@ export interface SharkStats {
   stashesBuried: number;
   mergesToMain: number;
   prsOpened: number;
+  chumJackpots: number;
   storagePath: string;
 }
 
@@ -21,6 +22,7 @@ export const XP_PER_COMMIT = 1;
 export const XP_PER_PUSH = 5;
 export const XP_PER_NEW_PR = 10;
 export const XP_PER_MAIN_MERGE = 10;
+export const XP_PER_CHUM_JACKPOT = 100;
 
 export interface SharkRankInfo {
   level: number;
@@ -93,9 +95,10 @@ export const SHARK_RANKS: {
 export function computeSharkRank(stats: SharkStats): SharkRankInfo {
   const prs = Math.max(stats.prsOpened || 0, stats.mergesToMain || 0);
   const totalScore =
-    stats.commitsSwum * XP_PER_COMMIT +
-    stats.pushesLaunched * XP_PER_PUSH +
-    prs * XP_PER_NEW_PR;
+    (stats.commitsSwum || 0) * XP_PER_COMMIT +
+    (stats.pushesLaunched || 0) * XP_PER_PUSH +
+    prs * XP_PER_NEW_PR +
+    (stats.chumJackpots || 0) * XP_PER_CHUM_JACKPOT;
 
   let current = SHARK_RANKS[0];
   for (const tier of SHARK_RANKS) {
@@ -161,6 +164,7 @@ function loadLocalStats(): SharkStats {
         stashesBuried: Number(parsed.stashesBuried) || 0,
         mergesToMain: prs,
         prsOpened: prs,
+        chumJackpots: Number(parsed.chumJackpots) || 0,
         storagePath: parsed.storagePath || "~/.gitshark/shark_stats.json",
       };
     }
@@ -174,6 +178,7 @@ function loadLocalStats(): SharkStats {
     stashesBuried: 0,
     mergesToMain: 0,
     prsOpened: 0,
+    chumJackpots: 0,
     storagePath: "~/.gitshark/shark_stats.json",
   };
 }
@@ -196,7 +201,7 @@ interface SharkStoreState {
 
   initSharkStats: () => Promise<void>;
   recordSharkStat: (
-    kind: "commit" | "chomp" | "push" | "stash" | "pr" | "main_merge",
+    kind: "commit" | "chomp" | "push" | "stash" | "pr" | "main_merge" | "chum_jackpot",
     amount?: number
   ) => void;
   setCelebrationsEnabled: (enabled: boolean) => void;
@@ -209,6 +214,7 @@ interface SharkStoreState {
     message?: string
   ) => void;
   dismissCelebration: () => void;
+  awardChumJackpot: (amount?: number, reason?: string) => void;
   awardBonusXp: (amount: number, reason?: string) => void;
 }
 
@@ -251,6 +257,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
             stashesBuried: diskStats.stashes_buried || 0,
             mergesToMain: prs,
             prsOpened: prs,
+            chumJackpots: diskStats.chum_jackpots || 0,
             storagePath:
               diskStats.storage_path ||
               local.storagePath ||
@@ -269,6 +276,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
               stashes_buried: loaded.stashesBuried,
               merges_to_main: prs,
               prs_opened: prs,
+              chum_jackpots: loaded.chumJackpots,
               storage_path: loaded.storagePath,
             });
           }
@@ -285,6 +293,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
             ...local,
             mergesToMain: prs,
             prsOpened: prs,
+            chumJackpots: local.chumJackpots || 0,
             storagePath:
               diskStats.storage_path ||
               local.storagePath ||
@@ -301,6 +310,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
             stashes_buried: initial.stashesBuried,
             merges_to_main: prs,
             prs_opened: prs,
+            chum_jackpots: initial.chumJackpots,
             storage_path: initial.storagePath,
           });
         }
@@ -310,7 +320,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
     },
 
     recordSharkStat: (
-      kind: "commit" | "chomp" | "push" | "stash" | "pr" | "main_merge",
+      kind: "commit" | "chomp" | "push" | "stash" | "pr" | "main_merge" | "chum_jackpot",
       amount = 1
     ) => {
       const prevStats = get().stats;
@@ -340,6 +350,10 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
             : prevStats.stashesBuried,
         mergesToMain: nextPrs,
         prsOpened: nextPrs,
+        chumJackpots:
+          kind === "chum_jackpot"
+            ? (prevStats.chumJackpots || 0) + amount
+            : prevStats.chumJackpots || 0,
       };
 
       saveLocalStats(nextStats);
@@ -362,6 +376,7 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
         stashes_buried: nextStats.stashesBuried,
         merges_to_main: nextStats.mergesToMain,
         prs_opened: nextStats.prsOpened,
+        chum_jackpots: nextStats.chumJackpots,
         storage_path: nextStats.storagePath,
       }).catch((err) => {
         console.warn("Failed to write shark stats to disk:", err);
@@ -413,9 +428,15 @@ export const useSharkStore = create<SharkStoreState>((set, get) => {
       set({ activeCelebration: null });
     },
 
+    awardChumJackpot: (amount = 100, reason = "CHUM BUCKET JACKPOT! 🦈💰") => {
+      get().recordSharkStat("chum_jackpot", 1);
+      get().triggerCelebration("frenzy", `🎰 ${reason} (+${amount} XP!)`);
+    },
+
     awardBonusXp: (amount: number, reason = "Bonus XP") => {
-      // Commits count 1:1 for XP in computeSharkRank
-      get().recordSharkStat("commit", amount);
+      // Commits are preserved; Chum Jackpots are tracked separately (+100 XP per jackpot)
+      const jackpots = Math.max(1, Math.round(amount / 100));
+      get().recordSharkStat("chum_jackpot", jackpots);
       get().triggerCelebration("frenzy", `🎰 ${reason} (+${amount} XP!)`);
     },
   };

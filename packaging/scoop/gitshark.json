@@ -1,11 +1,11 @@
 {
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Blazingly fast, modern Git desktop client built with Tauri v2 and Rust",
   "homepage": "https://github.com/whitesoup12/gitshark",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/whitesoup12/gitshark/releases/download/v2.1.0/gitshark-v2.1.0-windows-x64-portable.zip",
+      "url": "https://github.com/whitesoup12/gitshark/releases/download/v2.1.1/gitshark-v2.1.1-windows-x64-portable.zip",
       "hash": "6193d554e6a84cb7c5214b4de05711c076cae9dc9561e7729a1abc77b1fa8e8b"
     }
   },

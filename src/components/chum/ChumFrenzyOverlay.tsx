@@ -118,29 +118,62 @@ export const ChumFrenzyOverlay: React.FC = () => {
           }
         }
 
-        // 2. Update sharks hunting AI (graceful predator stalking)
+        // 2. Update sharks hunting AI (graceful predator swarming & flanking)
         const updatedSharks: FrenzyShark[] = [];
         const uneatenChum = updatedChum.filter((c) => !c.eaten);
+
+        // Track targets already claimed by sharks to distribute the swarm across different chum
+        const targetedChumIds = new Set<string>();
+        for (const s of currentSharks) {
+          if (s.targetChumId && uneatenChum.some((c) => c.id === s.targetChumId)) {
+            targetedChumIds.add(s.targetChumId);
+          }
+        }
 
         for (const shark of currentSharks) {
           let { x, y, angle, speed, maxSpeed, chompAnim, targetChumId } = shark;
 
-          // Find target chum
-          let targetChum = uneatenChum.find((c) => c.id === targetChumId);
+          // Check if existing target is still valid and uneaten
+          let targetChum = uneatenChum.find((c) => c.id === targetChumId && !c.eaten);
+
+          // If no target or target was eaten, find the best unclaimed chum piece to branch out
           if (!targetChum && uneatenChum.length > 0) {
-            // Find closest chum
-            let closestDist = Infinity;
-            let closest: ChumPiece | null = null;
+            let bestScore = Infinity;
+            let bestChum: ChumPiece | null = null;
+
             for (const c of uneatenChum) {
               const d = Math.hypot(c.x - x, c.y - y);
-              if (d < closestDist) {
-                closestDist = d;
-                closest = c;
+              // Strongly penalize chum pieces already targeted by other sharks so they branch out
+              const isTargeted = targetedChumIds.has(c.id);
+              const score = d + (isTargeted ? 520 : 0);
+
+              if (score < bestScore) {
+                bestScore = score;
+                bestChum = c;
               }
             }
-            if (closest) {
-              targetChum = closest;
-              targetChumId = closest.id;
+
+            if (bestChum) {
+              targetChum = bestChum;
+              targetChumId = bestChum.id;
+              targetedChumIds.add(bestChum.id);
+            }
+          }
+
+          // Calculate swarm separation vector from other sharks to avoid clumping together
+          let sepDx = 0;
+          let sepDy = 0;
+          const separationRadius = 160;
+
+          for (const other of currentSharks) {
+            if (other.id === shark.id) continue;
+            const odx = x - other.x;
+            const ody = y - other.y;
+            const dist = Math.hypot(odx, ody);
+            if (dist > 0 && dist < separationRadius) {
+              const push = (separationRadius - dist) / separationRadius;
+              sepDx += (odx / dist) * push;
+              sepDy += (ody / dist) * push;
             }
           }
 
@@ -152,30 +185,49 @@ export const ChumFrenzyOverlay: React.FC = () => {
             const dy = targetChum.y - y;
             const dist = Math.hypot(dx, dy);
 
-            targetAngle = Math.atan2(dy, dx);
+            // Attractor heading towards target chum
+            const toTargetX = dx / Math.max(1, dist);
+            const toTargetY = dy / Math.max(1, dist);
 
-            // Chomp distance threshold (~40px)
+            // Blend separation vector (swarming repulsion) so sharks branch out and swoop around each other
+            const sepWeight = shark.separationWeight ?? 1.4;
+            const steerX = toTargetX + sepDx * sepWeight;
+            const steerY = toTargetY + sepDy * sepWeight;
+
+            targetAngle = Math.atan2(steerY, steerX);
+
+            // Chomp distance threshold (~42px)
             if (dist < 42) {
               targetChum.eaten = true;
               chompAnim = 16;
               addChompSplash(targetChum.x, targetChum.y, shark.glowColor);
               desiredSpeed = maxSpeed * 1.25; // brief surge
             } else {
-              desiredSpeed = Math.min(speed + 0.05, maxSpeed * 0.85); // calm cruising speed
+              desiredSpeed = Math.min(speed + 0.06, maxSpeed * 0.9);
             }
           } else {
-            // No chum left: swim outward off-screen
+            // No chum left: swim outward off-screen, fanning out in diverse exit paths
             const exitLeft = x < screenW / 2;
-            targetAngle = exitLeft ? Math.PI : 0;
-            desiredSpeed = maxSpeed * 0.85;
+            const verticalExitOffset = Math.sin((shark.swimPhase || 0) + y * 0.008) * 0.35;
+            const baseAngle = exitLeft ? Math.PI : 0;
+            const steerX = Math.cos(baseAngle + verticalExitOffset) + sepDx * 1.2;
+            const steerY = Math.sin(baseAngle + verticalExitOffset) + sepDy * 1.2;
+            targetAngle = Math.atan2(steerY, steerX);
+            desiredSpeed = maxSpeed * 0.9;
           }
 
-          // Smooth turning towards target angle with wide predator arcs
-          let angleDiff = targetAngle - angle;
+          // Add natural sinuous swimming undulation
+          const phase = shark.swimPhase ?? x * 0.01;
+          const weave = Math.sin(currentTime * 0.0032 + phase) * 0.12;
+          const adjustedTargetAngle = targetAngle + weave;
+
+          // Smooth turning towards target angle with predator agility
+          let angleDiff = adjustedTargetAngle - angle;
           while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-          angle += angleDiff * 0.045; // wide, graceful circling predator curves
+          const turnRate = shark.turnSpeed ?? 0.052;
+          angle += angleDiff * turnRate;
 
           // Move forward along heading
           x += Math.cos(angle) * desiredSpeed;

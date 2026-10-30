@@ -199,20 +199,6 @@ try {
   // Cargo check will be run on pre-commit/build anyway
 }
 
-// 10. Update src/data/changelog.ts template if needed
-const changelogPath = path.join(rootDir, "src", "data", "changelog.ts");
-if (fs.existsSync(changelogPath)) {
-  let changelog = fs.readFileSync(changelogPath, "utf8");
-  const hasVersion = new RegExp(`version:\\s*["']${newVersion}["']`).test(changelog);
-  if (!hasVersion) {
-    const today = new Date().toISOString().slice(0, 10);
-    const template = `  {\n    version: "${newVersion}",\n    date: "${today}",\n    title: "Version ${newVersion}",\n    summary: "Release highlights and updates for v${newVersion}.",\n    whatsNew: [\n      "New feature or improvement.",\n    ],\n    fixes: [\n      "Bug fixes and stability updates.",\n    ],\n    improvements: [\n      "Performance and UX enhancements.",\n    ],\n  },\n`;
-    changelog = changelog.replace(/(export const CHANGELOG: ReleaseNote\[\] = \[\n)/, `$1${template}`);
-    fs.writeFileSync(changelogPath, changelog, "utf8");
-    updatedFiles.push("src/data/changelog.ts");
-  }
-}
-
 console.log("Updated files:");
 for (const f of updatedFiles) {
   console.log(`  ✔ ${f}`);
@@ -222,8 +208,7 @@ console.log(`
 🎉 Successfully bumped version to v${newVersion}!
 
 Next suggested steps:
-  1. Update release notes in src/data/changelog.ts for the What's New modal
-  2. git add -A
-  3. git commit -m "chore: bump version to v${newVersion}"
-  4. git push
+  1. git add -A
+  2. git commit -m "chore: bump version to v${newVersion}"
+  3. git push
 `);

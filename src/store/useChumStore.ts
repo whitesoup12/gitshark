@@ -33,6 +33,9 @@ export interface FrenzyShark {
   chompAnim: number; // 0 when not chomping, countdown when chomping
   targetChumId: string | null;
   state: "hunting" | "eating" | "departing";
+  swimPhase?: number;
+  turnSpeed?: number;
+  separationWeight?: number;
 }
 
 export interface ChompParticle {
@@ -129,7 +132,7 @@ export const useChumStore = create<ChumState>((set, get) => ({
     // 3. Rare chance (< 1%, specifically 0.8% = 1 in 125 chance) to award 100 XP jackpot!
     const isJackpot = Math.random() < 0.008;
     if (isJackpot) {
-      useSharkStore.getState().awardBonusXp(100, "CHUM BUCKET JACKPOT! 🦈💰");
+      useSharkStore.getState().awardChumJackpot(100, "CHUM BUCKET JACKPOT! 🦈💰");
     }
 
     // 4. Delay the sharks by 2.0s so the chum has time to slowly float down before sharks emerge!
@@ -141,44 +144,64 @@ export const useChumStore = create<ChumState>((set, get) => ({
       const targetSharkCount = Math.min(activeSharks.length + 3, 5);
       const newSharks: FrenzyShark[] = [...activeSharks];
 
-      // If jackpot, add a glowing Golden Megalodon shark!
+      // If jackpot, add a glowing Golden Megalodon shark sweeping across!
       if (isJackpot && !newSharks.some((s) => s.id.startsWith("shark_gold"))) {
         newSharks.push({
           id: `shark_gold_${Date.now()}`,
-          x: -240,
+          x: -260,
           y: window.innerHeight * 0.45,
-          angle: 0,
-          targetAngle: 0,
-          speed: 2.6,
-          maxSpeed: 4.2,
+          angle: 0.1,
+          targetAngle: 0.1,
+          speed: 2.8,
+          maxSpeed: 4.5,
           size: 240,
           glowColor: "#ffd700",
           chompAnim: 0,
           targetChumId: null,
           state: "hunting",
+          swimPhase: Math.random() * Math.PI * 2,
+          turnSpeed: 0.042,
+          separationWeight: 1.8,
         });
       }
 
+      let spawnIndex = newSharks.length;
       while (newSharks.length < targetSharkCount) {
-        const fromLeft = Math.random() > 0.5;
-        const startX = fromLeft ? -220 : window.innerWidth + 220;
-        const startY = Math.random() * (window.innerHeight * 0.6) + window.innerHeight * 0.25;
-        const initialAngle = fromLeft ? 0 : Math.PI;
+        // Alternate entrance sides (left vs right) and vary entry depths to encircle the chum cloud
+        const fromLeft = spawnIndex % 2 === 0;
+        const startX = fromLeft
+          ? -220 - Math.random() * 80
+          : window.innerWidth + 220 + Math.random() * 80;
+
+        // Distribute vertical entry lanes (upper, mid, deep waters)
+        const verticalSpread = spawnIndex / Math.max(1, targetSharkCount - 1);
+        const startY =
+          window.innerHeight * 0.18 +
+          verticalSpread * window.innerHeight * 0.62 +
+          (Math.random() - 0.5) * 60;
+
+        // Inward attack angles with vertical tilt
+        const verticalTilt = (Math.random() - 0.5) * 0.45;
+        const initialAngle = fromLeft ? verticalTilt : Math.PI - verticalTilt;
 
         newSharks.push({
           id: `shark_${Date.now()}_${newSharks.length}_${Math.random()}`,
           x: startX,
-          y: startY,
+          y: Math.max(80, Math.min(window.innerHeight - 80, startY)),
           angle: initialAngle,
           targetAngle: initialAngle,
-          speed: Math.random() * 0.8 + 2.0, // relaxed cruising speed
-          maxSpeed: Math.random() * 1.2 + 3.4, // smooth top speed
+          speed: Math.random() * 0.8 + 2.2, // varied cruising speed
+          maxSpeed: Math.random() * 1.2 + 3.6, // varied top speed
           size: Math.floor(Math.random() * 50) + 140, // 140px to 190px
           glowColor: SHARK_COLORS[Math.floor(Math.random() * SHARK_COLORS.length)],
           chompAnim: 0,
           targetChumId: null,
           state: "hunting",
+          swimPhase: Math.random() * Math.PI * 2,
+          turnSpeed: Math.random() * 0.02 + 0.048,
+          separationWeight: Math.random() * 0.4 + 1.3,
         });
+        spawnIndex++;
       }
 
       set({ sharks: newSharks });

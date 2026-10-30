@@ -10,11 +10,9 @@ import {
   X,
   Sparkles,
   RefreshCw,
-  Waves,
   Copy,
   Check,
   Trophy,
-  Flame,
   HardDrive,
 } from "lucide-react";
 
@@ -304,7 +302,6 @@ export const SharkWisdomModal: React.FC = () => {
     currentWisdomIndex,
     closeWisdom,
     nextWisdom,
-    triggerCelebration,
     stats,
   } = useSharkStore();
 
@@ -334,19 +331,6 @@ export const SharkWisdomModal: React.FC = () => {
   const currentQuote =
     SHARK_WISDOM_QUOTES[currentWisdomIndex] || SHARK_WISDOM_QUOTES[0];
   const rank = computeSharkRank(stats);
-
-  const handleSwimAcross = () => {
-    triggerCelebration(
-      "swim",
-      `${rank.emoji} ${rank.title} patrolling the commit waters!`
-    );
-    closeWisdom();
-  };
-
-  const handleChompTest = () => {
-    triggerCelebration("chomp", "CHOMP! Snapping through stale code! 🦈");
-    closeWisdom();
-  };
 
   return (
     <div
@@ -418,8 +402,8 @@ export const SharkWisdomModal: React.FC = () => {
             />
           </div>
 
-          {/* 3 Feeding & XP Stat Counters */}
-          <div className="grid grid-cols-3 gap-1.5 pt-0.5 text-center">
+          {/* 4 Feeding & XP Stat Counters */}
+          <div className="grid grid-cols-4 gap-1.5 pt-0.5 text-center">
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
               title="Commits created (+1 XP each)"
@@ -449,6 +433,16 @@ export const SharkWisdomModal: React.FC = () => {
               </div>
               <div className="text-[9px] text-slate-400 truncate">New PRs</div>
               <div className="text-[8px] font-mono text-purple-400/80">+10 XP</div>
+            </div>
+            <div
+              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
+              title="Chum Bucket Jackpots hit (+100 XP each)"
+            >
+              <div className="text-xs font-bold font-mono text-amber-300">
+                {stats.chumJackpots || 0}
+              </div>
+              <div className="text-[9px] text-slate-400 truncate">Jackpots</div>
+              <div className="text-[8px] font-mono text-amber-400/80">+100 XP</div>
             </div>
           </div>
 
@@ -502,26 +496,6 @@ export const SharkWisdomModal: React.FC = () => {
             <RefreshCw className="w-3 h-3 text-sky-400" />
             <span>Next Tip</span>
           </button>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleChompTest}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 hover:text-emerald-200 transition-colors text-[11px] font-semibold"
-              title="Trigger Shark Chomp Jaws animation"
-            >
-              <Flame className="w-3 h-3 text-emerald-400" />
-              <span>Chomp!</span>
-            </button>
-
-            <button
-              onClick={handleSwimAcross}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 text-sky-300 hover:text-sky-200 transition-colors text-[11px] font-semibold shadow-sm"
-              title="Launch a swimming shark across the screen"
-            >
-              <Waves className="w-3 h-3 text-sky-400" />
-              <span>Swim! 🦈</span>
-            </button>
-          </div>
         </div>
       </div>
 

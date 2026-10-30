@@ -23,7 +23,6 @@ import { APP_VERSION } from "@/constants/version";
 import { useUpdateStore } from "@/store/useUpdateStore";
 import { openInBrowserIpc } from "@/lib/ipc";
 import { GitSharkLogo } from "@/components/common/GitSharkLogo";
-import { useChangelogStore } from "@/store/useChangelogStore";
 import type { SettingsTab } from "@/types";
 import { THEMES } from "@/lib/theme";
 
@@ -705,15 +704,6 @@ export const SettingsModal: React.FC = () => {
                     <p className="text-xs text-slate-400 leading-relaxed">
                       Blazingly fast, modern Git desktop client built with Tauri v2, Rust (libgit2), React 19, and Tailwind CSS.
                     </p>
-                    <div className="pt-1.5 flex items-center gap-2">
-                      <button
-                        onClick={() => useChangelogStore.getState().openWhatsNew()}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-950/80 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-800/60 shadow-sm transition-all hover:scale-105 active:scale-95"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>What's New in v{APP_VERSION}</span>
-                      </button>
-                    </div>
                   </div>
                 </div>
 
@@ -725,13 +715,6 @@ export const SettingsModal: React.FC = () => {
                       <span className="font-medium text-slate-200">Software Updates</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => useChangelogStore.getState().openWhatsNew()}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-shark-850 hover:bg-shark-800 border border-shark-750 text-slate-300 hover:text-cyan-300 transition-colors text-[11px]"
-                      >
-                        <Sparkles className="w-3 h-3 text-cyan-400" />
-                        <span>Release Notes</span>
-                      </button>
                       <button
                         onClick={() => checkForUpdates(true)}
                         disabled={isCheckingUpdates}
