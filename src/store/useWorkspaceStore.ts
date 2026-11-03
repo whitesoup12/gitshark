@@ -2416,11 +2416,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       undefined;
     const prUrl = parsed.createPrUrl(targetBranch);
 
-    // Record XP and trigger celebration immediately so user actions are always rewarded
+    // Record stat and trigger celebration
     useSharkStore.getState().recordSharkStat("pr", 1);
     useSharkStore
       .getState()
-      .triggerCelebration("swim", "Pull Request Launched! (+10 XP) 🦈");
+      .triggerCelebration("swim", "Pull Request Launched! 🦈");
 
     try {
       await openInBrowserIpc(prUrl);

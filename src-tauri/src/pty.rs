@@ -71,20 +71,9 @@ impl PtyManager {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
-        // Ensure development tooling paths (Homebrew, Node, Cargo) are always available in GUI PTY
-        let current_path = std::env::var("PATH").unwrap_or_default();
-        let mut extra_paths = vec![
-            "/opt/homebrew/bin".to_string(),
-            "/opt/homebrew/sbin".to_string(),
-            "/usr/local/bin".to_string(),
-            "/usr/local/sbin".to_string(),
-        ];
-        if let Ok(home) = std::env::var("HOME") {
-            extra_paths.push(format!("{home}/.cargo/bin"));
-            extra_paths.push(format!("{home}/.local/bin"));
-        }
-        let augmented_path = format!("{}:{current_path}", extra_paths.join(":"));
-        cmd.env("PATH", augmented_path);
+        // Ensure development tooling paths (Node, npx, pnpm, Cargo, Homebrew, Git)
+        // are always available in GUI PTY sessions across all platforms.
+        cmd.env("PATH", get_augmented_path());
 
         let child = pair
             .slave
@@ -258,5 +247,208 @@ impl PtyManager {
 impl Drop for PtyManager {
     fn drop(&mut self) {
         self.kill();
+    }
+}
+
+
+/// Builds an augmented PATH environment variable that ensures developer tooling
+/// (Node.js, npx, pnpm, yarn, bun, corepack, cargo, git, homebrew, etc.) is accessible
+/// within GitShark's GUI-spawned processes and PTY sessions across macOS, Linux, and Windows.
+pub fn get_augmented_path() -> std::ffi::OsString {
+    let mut resolved_paths: Vec<PathBuf> = Vec::new();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+    let mut add_path = |p: PathBuf| {
+        if p.as_os_str().is_empty() {
+            return;
+        }
+        #[cfg(windows)]
+        let norm_key = PathBuf::from(p.to_string_lossy().to_lowercase());
+        #[cfg(not(windows))]
+        let norm_key = p.clone();
+
+        if !seen.contains(&norm_key) {
+            seen.insert(norm_key);
+            resolved_paths.push(p);
+        }
+    };
+
+    // 1. Explicitly check PNPM_HOME if set in current environment
+    if let Ok(pnpm_home) = std::env::var("PNPM_HOME") {
+        let pb = PathBuf::from(pnpm_home);
+        if pb.is_dir() {
+            add_path(pb);
+        }
+    }
+
+    // 2. Platform-specific known development binary paths
+    #[cfg(not(windows))]
+    {
+        // On Unix/macOS, query login shell PATH if available (inherits ~/.zshrc, ~/.bashrc, etc.)
+        if let Ok(shell) = std::env::var("SHELL") {
+            if let Ok(output) = std::process::Command::new(&shell)
+                .args(["-l", "-c", "printf \"%s\" \"$PATH\""])
+                .output()
+            {
+                if output.status.success() {
+                    let shell_path_str = String::from_utf8_lossy(&output.stdout);
+                    for path in std::env::split_paths(&shell_path_str.trim().to_string()) {
+                        if path.is_dir() {
+                            add_path(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        let unix_system_paths = [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ];
+        for p in unix_system_paths {
+            let pb = PathBuf::from(p);
+            if pb.is_dir() {
+                add_path(pb);
+            }
+        }
+
+        if let Ok(home) = std::env::var("HOME") {
+            let home_paths = [
+                // pnpm standard paths
+                format!("{home}/Library/pnpm"),
+                format!("{home}/.local/share/pnpm"),
+                format!("{home}/.pnpm-global/bin"),
+                // Node & version manager paths
+                format!("{home}/.local/share/fnm"),
+                format!("{home}/.fnm/current/bin"),
+                format!("{home}/.volta/bin"),
+                format!("{home}/.asdf/shims"),
+                format!("{home}/.asdf/bin"),
+                format!("{home}/.local/share/mise/shims"),
+                format!("{home}/.local/share/mise/bin"),
+                // Bun, Yarn, Cargo, Local
+                format!("{home}/.bun/bin"),
+                format!("{home}/.yarn/bin"),
+                format!("{home}/.config/yarn/global/node_modules/.bin"),
+                format!("{home}/.npm-global/bin"),
+                format!("{home}/.cargo/bin"),
+                format!("{home}/.local/bin"),
+            ];
+            for p in home_paths {
+                let pb = PathBuf::from(p);
+                if pb.is_dir() {
+                    add_path(pb);
+                }
+            }
+
+            // Also check nvm versions directory (~/.nvm/versions/node/*/bin)
+            let nvm_versions_dir = PathBuf::from(format!("{home}/.nvm/versions/node"));
+            if nvm_versions_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(nvm_versions_dir) {
+                    for entry in entries.flatten() {
+                        let bin_dir = entry.path().join("bin");
+                        if bin_dir.is_dir() {
+                            add_path(bin_dir);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let win_local_paths = [
+                format!("{local_app_data}\\pnpm"),
+                format!("{local_app_data}\\Programs\\fnm"),
+                format!("{local_app_data}\\Programs\\Git\\cmd"),
+                format!("{local_app_data}\\Programs\\Git\\bin"),
+                format!("{local_app_data}\\Programs\\Git\\usr\\bin"),
+                format!("{local_app_data}\\Volta\\bin"),
+            ];
+            for p in win_local_paths {
+                let pb = PathBuf::from(p);
+                if pb.is_dir() {
+                    add_path(pb);
+                }
+            }
+        }
+
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            let win_roaming_paths = [
+                format!("{app_data}\\npm"),
+                format!("{app_data}\\fnm"),
+            ];
+            for p in win_roaming_paths {
+                let pb = PathBuf::from(p);
+                if pb.is_dir() {
+                    add_path(pb);
+                }
+            }
+        }
+
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            let user_paths = [
+                format!("{user_profile}\\.cargo\\bin"),
+                format!("{user_profile}\\.bun\\bin"),
+                format!("{user_profile}\\scoop\\shims"),
+                format!("{user_profile}\\scoop\\apps\\git\\current\\bin"),
+            ];
+            for p in user_paths {
+                let pb = PathBuf::from(p);
+                if pb.is_dir() {
+                    add_path(pb);
+                }
+            }
+        }
+
+        // Program Files standard 64-bit and 32-bit Node & Git locations
+        let program_files = [
+            "C:\\Program Files\\nodejs",
+            "C:\\Program Files (x86)\\nodejs",
+            "C:\\Program Files\\Git\\cmd",
+            "C:\\Program Files\\Git\\bin",
+            "C:\\Program Files\\Git\\usr\\bin",
+            "C:\\Program Files (x86)\\Git\\cmd",
+            "C:\\Program Files (x86)\\Git\\bin",
+            "C:\\Program Files (x86)\\Git\\usr\\bin",
+            "C:\\ProgramData\\chocolatey\\bin",
+        ];
+        for p in program_files {
+            let pb = PathBuf::from(p);
+            if pb.is_dir() {
+                add_path(pb);
+            }
+        }
+    }
+
+    // 3. Append existing PATH entries from the current runtime environment
+    if let Some(current_path_os) = std::env::var_os("PATH") {
+        for path in std::env::split_paths(&current_path_os) {
+            add_path(path);
+        }
+    }
+
+    // 4. Safely join using OS-native delimiter (; on Windows, : on Unix)
+    std::env::join_paths(resolved_paths).unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_augmented_path_contains_valid_entries() {
+        let path = get_augmented_path();
+        assert!(!path.is_empty(), "Augmented path must not be empty");
+        let entries: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        assert!(!entries.is_empty(), "Augmented path must contain entries");
     }
 }

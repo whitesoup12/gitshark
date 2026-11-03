@@ -20,8 +20,8 @@ export interface SharkStats {
 
 export const XP_PER_COMMIT = 1;
 export const XP_PER_PUSH = 5;
-export const XP_PER_NEW_PR = 10;
-export const XP_PER_MAIN_MERGE = 10;
+export const XP_PER_NEW_PR = 0;
+export const XP_PER_MAIN_MERGE = 0;
 export const XP_PER_CHUM_JACKPOT = 100;
 
 export interface SharkRankInfo {
@@ -93,11 +93,9 @@ export const SHARK_RANKS: {
 ];
 
 export function computeSharkRank(stats: SharkStats): SharkRankInfo {
-  const prs = Math.max(stats.prsOpened || 0, stats.mergesToMain || 0);
   const totalScore =
     (stats.commitsSwum || 0) * XP_PER_COMMIT +
     (stats.pushesLaunched || 0) * XP_PER_PUSH +
-    prs * XP_PER_NEW_PR +
     (stats.chumJackpots || 0) * XP_PER_CHUM_JACKPOT;
 
   let current = SHARK_RANKS[0];

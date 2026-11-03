@@ -211,7 +211,6 @@ export const PullRequestComparisonView: React.FC<PullRequestComparisonViewProps>
 
     navigator.clipboard.writeText(lines.join("\n"));
     setCopiedSummary(true);
-    useSharkStore.getState().recordSharkStat("pr", 1);
     useSharkStore.getState().triggerCelebration("chomp", "Copied PR Summary to clipboard! 📋🦈");
     setTimeout(() => setCopiedSummary(false), 2000);
   };

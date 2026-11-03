@@ -634,6 +634,7 @@ use std::os::windows::process::CommandExt;
 #[allow(unused_mut)]
 fn create_silent_command<S: AsRef<std::ffi::OsStr>>(program: S) -> std::process::Command {
     let mut cmd = std::process::Command::new(program);
+    cmd.env("PATH", crate::pty::get_augmented_path());
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;

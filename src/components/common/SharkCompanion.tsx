@@ -402,8 +402,8 @@ export const SharkWisdomModal: React.FC = () => {
             />
           </div>
 
-          {/* 4 Feeding & XP Stat Counters */}
-          <div className="grid grid-cols-4 gap-1.5 pt-0.5 text-center">
+          {/* 3 Feeding & XP Stat Counters */}
+          <div className="grid grid-cols-3 gap-1.5 pt-0.5 text-center">
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
               title="Commits created (+1 XP each)"
@@ -423,16 +423,6 @@ export const SharkWisdomModal: React.FC = () => {
               </div>
               <div className="text-[9px] text-slate-400 truncate">Pushes</div>
               <div className="text-[8px] font-mono text-emerald-400/80">+5 XP</div>
-            </div>
-            <div
-              className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
-              title="Pull requests launched in GitShark (+10 XP each)"
-            >
-              <div className="text-xs font-bold font-mono text-purple-300">
-                {stats.prsOpened ?? stats.mergesToMain ?? 0}
-              </div>
-              <div className="text-[9px] text-slate-400 truncate">New PRs</div>
-              <div className="text-[8px] font-mono text-purple-400/80">+10 XP</div>
             </div>
             <div
               className="p-1.5 rounded bg-shark-900/90 border border-shark-800/80"
