@@ -15,6 +15,7 @@ import { useCommandPaletteStore } from "@/store/useCommandPaletteStore";
 import { useUpdateStore } from "@/store/useUpdateStore";
 import { launchOrFocusCodeShark } from "@/lib/ipc";
 import { ChumFrenzyOverlay } from "@/components/chum/ChumFrenzyOverlay";
+import { ArchitectureMismatchBanner } from "@/components/common/ArchitectureMismatchBanner";
 
 export const App: React.FC = () => {
   const { tabs, activeTabId, initWorkspaceSession } = useWorkspaceStore();
@@ -90,6 +91,9 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-shark-950 font-sans">
       {/* Top Multi-Repository Tab Bar */}
       <TabBar />
+
+      {/* Proactive Architecture / Rosetta Translation Mismatch Warning */}
+      <ArchitectureMismatchBanner />
 
       {/* Active Tab Workspace Shell or Empty Workspace */}
       {activeTab ? (

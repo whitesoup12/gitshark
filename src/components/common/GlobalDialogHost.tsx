@@ -6,6 +6,9 @@ import {
   Info,
   X,
   HelpCircle,
+  ShieldCheck,
+  ShieldAlert,
+  Play,
 } from "lucide-react";
 import { useDialogStore, DialogVariant } from "@/store/useDialogStore";
 
@@ -23,6 +26,7 @@ export const GlobalDialogHost: React.FC = () => {
     closeWithConfirm,
     closeWithCancel,
     setPromptValue,
+    hookNames,
   } = useDialogStore();
 
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
@@ -55,6 +59,14 @@ export const GlobalDialogHost: React.FC = () => {
   if (!isOpen) return null;
 
   const renderIcon = (v: DialogVariant) => {
+    if (type === "hook-confirm") {
+      return (
+        <div className="p-2.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex-shrink-0">
+          <ShieldCheck className="w-5 h-5" />
+        </div>
+      );
+    }
+
     switch (v) {
       case "danger":
       case "error":
@@ -142,6 +154,20 @@ export const GlobalDialogHost: React.FC = () => {
             {message}
           </div>
 
+          {type === "hook-confirm" && hookNames && hookNames.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <span className="text-[11px] text-slate-400 font-medium">Configured hooks:</span>
+              {hookNames.map((name) => (
+                <span
+                  key={name}
+                  className="px-2 py-0.5 rounded bg-shark-800 border border-shark-700 text-sky-300 font-mono text-[11px]"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+
           {type === "prompt" && (
             <form
               onSubmit={(e) => {
@@ -164,25 +190,57 @@ export const GlobalDialogHost: React.FC = () => {
 
         {/* Modal Actions */}
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-shark-800/80 bg-shark-950/40 mt-3">
-          {type !== "alert" && (
-            <button
-              type="button"
-              onClick={closeWithCancel}
-              className="px-3.5 py-1.5 rounded-lg border border-shark-750 bg-shark-850 hover:bg-shark-800 text-slate-300 hover:text-slate-100 text-xs font-medium transition-colors"
-            >
-              {cancelText}
-            </button>
+          {type === "hook-confirm" ? (
+            <>
+              <button
+                type="button"
+                onClick={closeWithCancel}
+                className="px-3.5 py-1.5 rounded-lg border border-shark-750 bg-shark-850 hover:bg-shark-800 text-slate-300 hover:text-slate-100 text-xs font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => closeWithConfirm("skip")}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-amber-700/70 bg-amber-950/70 hover:bg-amber-900/80 text-amber-200 text-xs font-medium transition-colors shadow-sm"
+                title="Bypass hooks and execute with --no-verify"
+              >
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                <span>Skip Hooks (--no-verify)</span>
+              </button>
+              <button
+                ref={confirmBtnRef}
+                type="button"
+                onClick={() => closeWithConfirm("run")}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-all bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white shadow-lg shadow-sky-950/50"
+              >
+                <Play className="w-3 h-3 fill-current" />
+                <span>{confirmText}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {type !== "alert" && (
+                <button
+                  type="button"
+                  onClick={closeWithCancel}
+                  className="px-3.5 py-1.5 rounded-lg border border-shark-750 bg-shark-850 hover:bg-shark-800 text-slate-300 hover:text-slate-100 text-xs font-medium transition-colors"
+                >
+                  {cancelText}
+                </button>
+              )}
+              <button
+                ref={confirmBtnRef}
+                type="button"
+                onClick={() => closeWithConfirm()}
+                className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${getConfirmButtonClasses(
+                  variant
+                )}`}
+              >
+                {confirmText}
+              </button>
+            </>
           )}
-          <button
-            ref={confirmBtnRef}
-            type="button"
-            onClick={() => closeWithConfirm()}
-            className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${getConfirmButtonClasses(
-              variant
-            )}`}
-          >
-            {confirmText}
-          </button>
         </div>
       </div>
     </div>

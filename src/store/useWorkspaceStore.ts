@@ -65,7 +65,7 @@ import { useSharkStore } from "@/store/useSharkStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { parseGitRemoteUrl } from "@/lib/remoteUrl";
 import { fetchRepoPullRequests } from "@/lib/pullRequests";
-import { showAlert, showConfirm } from "@/store/useDialogStore";
+import { showAlert, showConfirm, showHookConfirm } from "@/store/useDialogStore";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -88,7 +88,7 @@ interface WorkspaceState {
   // Hook & Process Orchestration
   fetchRepoHooks: (tabId: string) => Promise<RepoHooksInfo | null>;
   executeHookDryRun: (tabId: string, hookName: string) => Promise<boolean>;
-  executeCommit: (tabId: string, message: string, amend?: boolean) => Promise<boolean>;
+  executeCommit: (tabId: string, message: string, amend?: boolean, noVerify?: boolean) => Promise<boolean>;
   executePush: (
     tabId: string,
     remote?: string,
@@ -96,8 +96,10 @@ interface WorkspaceState {
     force?: boolean,
     setUpstream?: boolean,
     tags?: boolean,
-    followTags?: boolean
+    followTags?: boolean,
+    noVerify?: boolean
   ) => Promise<boolean>;
+  pushWithNoVerify: (tabId: string) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
   autoFetchTab: (tabId: string) => Promise<void>;
@@ -483,7 +485,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  executeCommit: async (tabId: string, message: string, amend: boolean = false): Promise<boolean> => {
+  executeCommit: async (
+    tabId: string,
+    message: string,
+    amend: boolean = false,
+    noVerify?: boolean
+  ): Promise<boolean> => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
@@ -500,7 +507,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
     }
 
-    const hasPreCommit = hooksInfo?.has_pre_commit ?? false;
+    const hasCommitHooks = hooksInfo?.has_pre_commit || hooksInfo?.has_commit_msg;
+    let effectiveNoVerify = noVerify ?? false;
+
+    // Prompt user if commit hooks are detected and no decision has been passed explicitly
+    if (noVerify === undefined && hasCommitHooks) {
+      const activeHookNames =
+        hooksInfo?.active_hooks
+          .filter((h) => h.name === "pre-commit" || h.name === "commit-msg")
+          .map((h) => h.name) ?? ["pre-commit"];
+
+      const decision = await showHookConfirm({
+        action: "commit",
+        hookNames: activeHookNames.length > 0 ? activeHookNames : ["pre-commit"],
+      });
+
+      if (decision === "cancel") {
+        return false;
+      }
+      effectiveNoVerify = decision === "skip";
+    }
+
+    const hasPreCommit = (hooksInfo?.has_pre_commit ?? false) && !effectiveNoVerify;
     const initialStage: HookStage = hasPreCommit ? "pre-commit" : "committing";
 
     // 2. Open terminal drawer immediately
@@ -621,7 +649,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }
         });
 
-        await executeGitCommitIpc(repoId, message, amend);
+        await executeGitCommitIpc(repoId, message, amend, effectiveNoVerify);
       } catch (err) {
         if (isDone) return;
         isDone = true;
@@ -652,14 +680,42 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     force: boolean = false,
     setUpstream: boolean = false,
     tags?: boolean,
-    followTags?: boolean
+    followTags?: boolean,
+    noVerify?: boolean
   ): Promise<boolean> => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
     const repoId = tab.repoId;
-    const hasPrePush = tab.hooksInfo?.has_pre_push ?? false;
-    const initialStage: HookStage = hasPrePush ? "pre-push" : "pushing";
+
+    // 1. Fetch or use existing hooks info
+    let hooksInfo = tab.hooksInfo;
+    if (!hooksInfo) {
+      try {
+        hooksInfo = await getRepoHooksIpc(repoId);
+        get().updateTab(tabId, { hooksInfo });
+      } catch (e) {
+        console.warn("Failed to query hooks info:", e);
+      }
+    }
+
+    const hasPrePush = hooksInfo?.has_pre_push ?? false;
+    let effectiveNoVerify = noVerify ?? false;
+
+    // Prompt user if pre-push hook is detected and no decision has been passed explicitly
+    if (noVerify === undefined && hasPrePush) {
+      const decision = await showHookConfirm({
+        action: "push",
+        hookNames: ["pre-push"],
+      });
+
+      if (decision === "cancel") {
+        return false;
+      }
+      effectiveNoVerify = decision === "skip";
+    }
+
+    const initialStage: HookStage = (hasPrePush && !effectiveNoVerify) ? "pre-push" : "pushing";
 
     get().updateTab(tabId, {
       terminalOpen: true,
@@ -758,7 +814,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const pushTagsPref = useSettingsStore.getState().pushTagsOption;
         const effectiveTags = tags ?? (pushTagsPref === "all");
         const effectiveFollowTags = followTags ?? (pushTagsPref === "follow-tags");
-        await executeGitPushIpc(repoId, remote, branch, force, setUpstream, effectiveTags, effectiveFollowTags);
+        await executeGitPushIpc(repoId, remote, branch, force, setUpstream, effectiveTags, effectiveFollowTags, effectiveNoVerify);
       } catch (err) {
         if (isDone) return;
         isDone = true;
@@ -1639,6 +1695,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } else if (lastCommand === "push") {
       await get().executePush(tabId);
     }
+  },
+
+  pushWithNoVerify: async (tabId: string) => {
+    return await get().executePush(tabId, undefined, undefined, false, false, undefined, undefined, true);
   },
 
   dismissHookStatus: (tabId: string) => {

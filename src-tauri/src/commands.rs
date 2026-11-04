@@ -716,6 +716,62 @@ fn resolve_git_command() -> String {
     detect_system_git_command()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemArchInfo {
+    pub binary_arch: String,
+    pub is_rosetta: bool,
+    pub is_arm_hardware: bool,
+    pub is_arch_mismatch: bool,
+}
+
+#[tauri::command]
+pub fn get_system_arch_info() -> SystemArchInfo {
+    let binary_arch = std::env::consts::ARCH.to_string();
+    let mut is_rosetta = false;
+    let mut is_arm_hardware = false;
+
+    #[cfg(target_os = "macos")]
+    {
+        // 1. Check if running translated under Rosetta
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "sysctl.proc_translated"])
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout);
+                if s.trim() == "1" {
+                    is_rosetta = true;
+                }
+            }
+        }
+
+        // 2. Check if hardware CPU is ARM64
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "hw.optional.arm64"])
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout);
+                if s.trim() == "1" {
+                    is_arm_hardware = true;
+                }
+            }
+        }
+        if std::env::consts::ARCH == "aarch64" {
+            is_arm_hardware = true;
+        }
+    }
+
+    let is_arch_mismatch = is_rosetta || (is_arm_hardware && binary_arch == "x86_64");
+
+    SystemArchInfo {
+        binary_arch,
+        is_rosetta,
+        is_arm_hardware,
+        is_arch_mismatch,
+    }
+}
+
 #[tauri::command]
 pub fn get_git_binary_info() -> GitBinaryInfo {
     let custom_opt = CUSTOM_GIT_PATH.read().clone();
@@ -776,6 +832,7 @@ pub async fn execute_git_commit(
     repo_id: String,
     message: String,
     amend: bool,
+    no_verify: Option<bool>,
 ) -> Result<(), String> {
     if message.trim().is_empty() && !amend {
         return Err("Commit message cannot be empty".to_string());
@@ -793,6 +850,9 @@ pub async fn execute_git_commit(
     let mut args = vec!["commit".to_string()];
     if amend {
         args.push("--amend".to_string());
+    }
+    if no_verify.unwrap_or(false) {
+        args.push("--no-verify".to_string());
     }
     if !message.trim().is_empty() {
         args.push("-m".to_string());
@@ -821,6 +881,7 @@ pub async fn execute_git_push(
     set_upstream: Option<bool>,
     tags: Option<bool>,
     follow_tags: Option<bool>,
+    no_verify: Option<bool>,
 ) -> Result<(), String> {
     let (
         pty_manager,
@@ -905,6 +966,10 @@ pub async fn execute_git_push(
     let mut args = vec!["push".to_string()];
     if force.unwrap_or(false) {
         args.push("--force-with-lease".to_string());
+    }
+
+    if no_verify.unwrap_or(false) {
+        args.push("--no-verify".to_string());
     }
 
     if tags.unwrap_or(false) {
@@ -3406,6 +3471,12 @@ pub fn search_workspace_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_system_arch_info() {
+        let arch_info = get_system_arch_info();
+        assert!(!arch_info.binary_arch.is_empty());
+    }
 
     #[test]
     fn test_git_binary_info_query() {

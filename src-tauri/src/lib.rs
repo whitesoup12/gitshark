@@ -103,6 +103,7 @@ pub fn run() {
             commands::push_tag,
             commands::push_all_tags,
             commands::get_git_binary_info,
+            commands::get_system_arch_info,
             commands::validate_git_path,
             commands::set_custom_git_path,
             commands::set_diff_debounce_delay,

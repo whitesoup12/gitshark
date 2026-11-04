@@ -18,6 +18,7 @@ import type {
   CommitDetails,
   GitTagItem,
   GitBinaryInfo,
+  SystemArchInfo,
   ConflictFileDetails,
   FileBlameData,
   FileHistoryItem,
@@ -626,16 +627,18 @@ export async function listenToStatusChanged(
 export async function executeGitCommitIpc(
   repoId: string,
   message: string,
-  amend: boolean = false
+  amend: boolean = false,
+  noVerify: boolean = false
 ): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log(`[Browser Sim] git commit -m "${message}" (amend=${amend})`);
+    console.log(`[Browser Sim] git commit -m "${message}" (amend=${amend}, noVerify=${noVerify})`);
     return;
   }
   return await invoke<void>("execute_git_commit", {
     repoId,
     message,
     amend,
+    noVerify: noVerify || null,
   });
 }
 
@@ -649,10 +652,11 @@ export async function executeGitPushIpc(
   force: boolean = false,
   setUpstream: boolean = false,
   tags: boolean = false,
-  followTags: boolean = false
+  followTags: boolean = false,
+  noVerify: boolean = false
 ): Promise<void> {
   if (!isTauriEnvironment()) {
-    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force}, setUpstream=${setUpstream}, tags=${tags}, followTags=${followTags})`);
+    console.log(`[Browser Sim] git push ${remote || ""} ${branch || ""} (force=${force}, setUpstream=${setUpstream}, tags=${tags}, followTags=${followTags}, noVerify=${noVerify})`);
     return;
   }
   return await invoke<void>("execute_git_push", {
@@ -663,6 +667,7 @@ export async function executeGitPushIpc(
     setUpstream: setUpstream || null,
     tags: tags || null,
     followTags: followTags || null,
+    noVerify: noVerify || null,
   });
 }
 
@@ -1461,6 +1466,21 @@ export async function getGitBinaryInfoIpc(): Promise<GitBinaryInfo> {
     };
   }
   return await invoke<GitBinaryInfo>("get_git_binary_info");
+}
+
+/**
+ * Get system architecture info (Rosetta translation vs native Apple Silicon detection)
+ */
+export async function getSystemArchInfoIpc(): Promise<SystemArchInfo> {
+  if (!isTauriEnvironment()) {
+    return {
+      binary_arch: "aarch64",
+      is_rosetta: false,
+      is_arm_hardware: true,
+      is_arch_mismatch: false,
+    };
+  }
+  return await invoke<SystemArchInfo>("get_system_arch_info");
 }
 
 /**

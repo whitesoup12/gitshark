@@ -129,10 +129,22 @@ export const HookStatusPanel: React.FC<HookStatusPanelProps> = ({ tab }) => {
             <button
               onClick={() => retryLastHook(tab.id)}
               className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-medium text-white bg-sky-600 hover:bg-sky-500 transition-colors shadow-sm"
-              title={hookState?.lastCommand === "dry-run" ? "Re-run hook dry run" : "Retry commit execution"}
+              title={
+                hookState?.lastCommand === "dry-run"
+                  ? "Re-run hook dry run"
+                  : hookState?.lastCommand === "push"
+                  ? "Retry git push"
+                  : "Retry commit execution"
+              }
             >
               <RotateCcw className="w-2.5 h-2.5" />
-              <span>{hookState?.lastCommand === "dry-run" ? "Re-run Hook" : "Retry Commit"}</span>
+              <span>
+                {hookState?.lastCommand === "dry-run"
+                  ? "Re-run Hook"
+                  : hookState?.lastCommand === "push"
+                  ? "Retry Push"
+                  : "Retry Commit"}
+              </span>
             </button>
             <button
               onClick={() => dismissHookStatus(tab.id)}
