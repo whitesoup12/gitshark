@@ -65,7 +65,7 @@ import { useSharkStore } from "@/store/useSharkStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { parseGitRemoteUrl } from "@/lib/remoteUrl";
 import { fetchRepoPullRequests } from "@/lib/pullRequests";
-import { showAlert, showConfirm, showHookConfirm } from "@/store/useDialogStore";
+import { showAlert, showConfirm } from "@/store/useDialogStore";
 
 interface WorkspaceState {
   tabs: Tab[];
@@ -115,6 +115,7 @@ interface WorkspaceState {
   cancelActiveProcess: (tabId: string) => Promise<void>;
   retryLastHook: (tabId: string) => Promise<void>;
   dismissHookStatus: (tabId: string) => void;
+  toggleHookSkipped: (tabId: string, hookName: string) => void;
 
   // Milestone 5: Worktrees & Remote Sync
   fetchWorktrees: (tabId: string) => Promise<WorktreeItem[]>;
@@ -508,25 +509,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
 
     const hasCommitHooks = hooksInfo?.has_pre_commit || hooksInfo?.has_commit_msg;
-    let effectiveNoVerify = noVerify ?? false;
-
-    // Prompt user if commit hooks are detected and no decision has been passed explicitly
-    if (noVerify === undefined && hasCommitHooks) {
-      const activeHookNames =
-        hooksInfo?.active_hooks
-          .filter((h) => h.name === "pre-commit" || h.name === "commit-msg")
-          .map((h) => h.name) ?? ["pre-commit"];
-
-      const decision = await showHookConfirm({
-        action: "commit",
-        hookNames: activeHookNames.length > 0 ? activeHookNames : ["pre-commit"],
-      });
-
-      if (decision === "cancel") {
-        return false;
-      }
-      effectiveNoVerify = decision === "skip";
-    }
+    // Check if the user toggled off pre-commit or commit-msg in the Git Hooks section
+    const isCommitHookToggledOff =
+      !!tab.disabledHooks?.["pre-commit"] || !!tab.disabledHooks?.["commit-msg"];
+    const effectiveNoVerify = noVerify ?? (hasCommitHooks && isCommitHookToggledOff);
 
     const hasPreCommit = (hooksInfo?.has_pre_commit ?? false) && !effectiveNoVerify;
     const initialStage: HookStage = hasPreCommit ? "pre-commit" : "committing";
@@ -572,6 +558,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       let unlistenExitFn: (() => void) | null = null;
 
       const cleanup = () => {
+        // Auto-reset commit hook toggles back to default ON state after commit completes
+        const curTab = get().tabs.find((t) => t.id === tabId);
+        if (curTab?.disabledHooks) {
+          const next = { ...curTab.disabledHooks };
+          delete next["pre-commit"];
+          delete next["commit-msg"];
+          delete next["post-commit"];
+          get().updateTab(tabId, { disabledHooks: next });
+        }
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
@@ -700,20 +695,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
 
     const hasPrePush = hooksInfo?.has_pre_push ?? false;
-    let effectiveNoVerify = noVerify ?? false;
-
-    // Prompt user if pre-push hook is detected and no decision has been passed explicitly
-    if (noVerify === undefined && hasPrePush) {
-      const decision = await showHookConfirm({
-        action: "push",
-        hookNames: ["pre-push"],
-      });
-
-      if (decision === "cancel") {
-        return false;
-      }
-      effectiveNoVerify = decision === "skip";
-    }
+    // Check if the user toggled off pre-push in the Git Hooks section
+    const isPrePushToggledOff = !!tab.disabledHooks?.["pre-push"];
+    const effectiveNoVerify = noVerify ?? (hasPrePush && isPrePushToggledOff);
 
     const initialStage: HookStage = (hasPrePush && !effectiveNoVerify) ? "pre-push" : "pushing";
 
@@ -754,6 +738,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       let unlistenExitFn: (() => void) | null = null;
 
       const cleanup = () => {
+        // Auto-reset pre-push hook toggle back to default ON state after push completes
+        const curTab = get().tabs.find((t) => t.id === tabId);
+        if (curTab?.disabledHooks) {
+          const next = { ...curTab.disabledHooks };
+          delete next["pre-push"];
+          get().updateTab(tabId, { disabledHooks: next });
+        }
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
@@ -1705,6 +1696,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     get().updateTab(tabId, {
       hookState: undefined,
     });
+  },
+
+  toggleHookSkipped: (tabId: string, hookName: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const current = tab.disabledHooks || {};
+    const isCurrentlySkipped = !!current[hookName];
+    const next = { ...current };
+    if (isCurrentlySkipped) {
+      delete next[hookName];
+    } else {
+      next[hookName] = true;
+    }
+    get().updateTab(tabId, { disabledHooks: next });
   },
 
   fetchWorktrees: async (tabId: string) => {

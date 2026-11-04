@@ -29,6 +29,7 @@ export interface Tab {
   // Hook state and configuration
   hooksInfo?: RepoHooksInfo;
   hookState?: HookExecutionState;
+  disabledHooks?: Record<string, boolean>;
 
   // Milestone 5: Worktrees & Remote sync state
   worktrees?: WorktreeItem[];

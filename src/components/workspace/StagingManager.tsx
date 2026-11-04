@@ -645,11 +645,23 @@ export const StagingManager: React.FC<StagingManagerProps> = ({
           <span className="font-semibold text-slate-300 text-[11px]">Commit</span>
           {tab?.hooksInfo && tab.hooksInfo.active_hooks.length > 0 && (
             <div
-              className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono"
-              title={`Active hooks: ${tab.hooksInfo.active_hooks.map((h) => h.name).join(", ")}`}
+              className={`flex items-center gap-1 text-[10px] font-mono ${
+                tab.disabledHooks?.["pre-commit"] || tab.disabledHooks?.["commit-msg"]
+                  ? "text-amber-400"
+                  : "text-emerald-400"
+              }`}
+              title={
+                tab.disabledHooks?.["pre-commit"] || tab.disabledHooks?.["commit-msg"]
+                  ? "Pre-commit hook is toggled OFF in Git Hooks and will be skipped on this commit (will auto-reset to ON afterwards)"
+                  : `Active hooks: ${tab.hooksInfo.active_hooks.map((h) => h.name).join(", ")}`
+              }
             >
-              <ShieldCheck className="w-3 h-3 text-emerald-400" />
-              <span>{tab.hooksInfo.has_pre_commit ? "pre-commit" : "hooks"} active</span>
+              <ShieldCheck className="w-3 h-3" />
+              <span>
+                {tab.disabledHooks?.["pre-commit"] || tab.disabledHooks?.["commit-msg"]
+                  ? "pre-commit: SKIPPED"
+                  : `${tab.hooksInfo.has_pre_commit ? "pre-commit" : "hooks"} active`}
+              </span>
             </div>
           )}
         </div>
