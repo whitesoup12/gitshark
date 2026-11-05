@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Tab, StashItem, StashDetails, FileDiff } from "@/types";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { formatShortHash } from "@/lib/utils";
+import { buildSplitDiffRows } from "@/lib/diffUtils";
 import {
   Archive,
   X,
@@ -420,40 +421,109 @@ export const StashInspectorModal: React.FC<StashInspectorModalProps> = ({
                       </div>
 
                       {/* Hunk Lines */}
-                      <div className="overflow-x-auto">
-                        <div className="divide-y divide-shark-900/30 min-w-full w-fit">
-                          {hunk.lines.map((line, lIdx) => {
-                            const isAdd = line.origin === "+";
-                            const isDel = line.origin === "-";
+                      {diffViewMode === "unified" ? (
+                        <div className="overflow-x-auto">
+                          <div className="divide-y divide-shark-900/30 min-w-full w-fit">
+                            {hunk.lines.map((line, lIdx) => {
+                              const isAdd = line.origin === "+";
+                              const isDel = line.origin === "-";
 
-                            return (
-                              <div
-                                key={lIdx}
-                                className={`flex items-center leading-5 hover:bg-white/[0.02] min-w-full w-fit ${
-                                  isAdd
-                                    ? "bg-emerald-950/30 text-emerald-300"
-                                    : isDel
-                                    ? "bg-rose-950/30 text-rose-300"
-                                    : "text-slate-300"
-                                }`}
-                              >
-                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
-                                  {line.old_lineno ?? ""}
-                                </span>
-                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
-                                  {line.new_lineno ?? ""}
-                                </span>
-                                <span className="w-5 text-center select-none font-bold text-xs flex-shrink-0">
-                                  {line.origin === "+" || line.origin === "-" ? line.origin : " "}
-                                </span>
-                                <span className="flex-1 pr-3 whitespace-pre">
-                                  {line.content}
-                                </span>
-                              </div>
-                            );
-                          })}
+                              return (
+                                <div
+                                  key={lIdx}
+                                  className={`flex items-center leading-5 hover:bg-white/[0.02] min-w-full w-fit ${
+                                    isAdd
+                                      ? "bg-emerald-950/30 text-emerald-300"
+                                      : isDel
+                                      ? "bg-rose-950/30 text-rose-300"
+                                      : "text-slate-300"
+                                  }`}
+                                >
+                                  <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                    {line.old_lineno ?? ""}
+                                  </span>
+                                  <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                    {line.new_lineno ?? ""}
+                                  </span>
+                                  <span className="w-5 text-center select-none font-bold text-xs flex-shrink-0">
+                                    {line.origin === "+" || line.origin === "-" ? line.origin : " "}
+                                  </span>
+                                  <span className="flex-1 pr-3 whitespace-pre">
+                                    {line.content}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-full border-collapse">
+                            <colgroup>
+                              <col className="w-1/2" />
+                              <col className="w-1/2" />
+                            </colgroup>
+                            <tbody className="divide-y divide-shark-900/40">
+                              {buildSplitDiffRows(hunk.lines).map((row, rIdx) => {
+                                const leftLine = row.left;
+                                const rightLine = row.right;
+                                const isLeftDel = leftLine?.origin === "-";
+                                const isRightAdd = rightLine?.origin === "+";
+
+                                return (
+                                  <tr key={rIdx} className="leading-5 select-text hover:bg-white/[0.01]">
+                                    {/* Left column (Old / Deletion / Context) */}
+                                    <td
+                                      className={`p-0 align-top border-r border-shark-800 ${
+                                        isLeftDel
+                                          ? "bg-rose-950/30 text-rose-300"
+                                          : leftLine
+                                          ? "text-slate-300"
+                                          : "bg-shark-950/50 text-transparent select-none"
+                                      }`}
+                                    >
+                                      <div className="flex items-start min-w-[280px]">
+                                        <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                          {leftLine?.old_lineno ?? ""}
+                                        </span>
+                                        <span className="w-5 text-center font-bold select-none text-rose-400 flex-shrink-0">
+                                          {isLeftDel ? "-" : " "}
+                                        </span>
+                                        <span className="flex-1 pr-3 whitespace-pre">
+                                          {leftLine ? leftLine.content || " " : " "}
+                                        </span>
+                                      </div>
+                                    </td>
+
+                                    {/* Right column (New / Addition / Context) */}
+                                    <td
+                                      className={`p-0 align-top ${
+                                        isRightAdd
+                                          ? "bg-emerald-950/30 text-emerald-300"
+                                          : rightLine
+                                          ? "text-slate-300"
+                                          : "bg-shark-950/50 text-transparent select-none"
+                                      }`}
+                                    >
+                                      <div className="flex items-start min-w-[280px]">
+                                        <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                          {rightLine?.new_lineno ?? ""}
+                                        </span>
+                                        <span className="w-5 text-center font-bold select-none text-emerald-400 flex-shrink-0">
+                                          {isRightAdd ? "+" : " "}
+                                        </span>
+                                        <span className="flex-1 pr-3 whitespace-pre">
+                                          {rightLine ? rightLine.content || " " : " "}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

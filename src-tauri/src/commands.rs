@@ -2148,6 +2148,59 @@ pub async fn get_commit_file_diff(
 }
 
 #[tauri::command]
+pub async fn open_commit_file_in_codeshark(
+    app_handle: AppHandle,
+    state: State<'_, AppRepoState>,
+    repo_id: String,
+    commit_sha: String,
+    file_path: String,
+) -> Result<String, String> {
+    let (repo_name, content, is_binary) = {
+        let registry = state.read();
+        let session = registry
+            .get(&repo_id)
+            .ok_or_else(|| format!("Repository session '{}' not found", repo_id))?;
+        let repo_name = session.name.clone();
+        let repo = session.repo.lock();
+        let (bytes, is_bin) = git::get_commit_file_content(&repo, &commit_sha, &file_path)?;
+        (repo_name, bytes, is_bin)
+    };
+
+    if is_binary {
+        return Err("Cannot view binary file in CodeShark editor".to_string());
+    }
+
+    let clean_path = file_path.replace('\\', "/");
+    let clean_path = clean_path.trim_start_matches('/').to_string();
+
+    let short_sha = if commit_sha.len() >= 7 {
+        &commit_sha[..7]
+    } else {
+        &commit_sha
+    };
+
+    let gitshark_dir = resolve_gitshark_dir();
+    let snapshot_dir = gitshark_dir
+        .join("snapshots")
+        .join(format!("{}@{}", repo_name, short_sha));
+
+    let target_file = snapshot_dir.join(&clean_path);
+    if let Some(parent) = target_file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create snapshot directory: {e}"))?;
+    }
+
+    std::fs::write(&target_file, &content)
+        .map_err(|e| format!("Failed to write commit snapshot file: {e}"))?;
+
+    let target_path_str = target_file.to_string_lossy().to_string();
+
+    launch_or_focus_codeshark(app_handle, Some(target_path_str.clone())).await?;
+
+    Ok(target_path_str)
+}
+
+#[tauri::command]
 pub async fn get_branch_comparison(
     state: State<'_, AppRepoState>,
     repo_id: String,

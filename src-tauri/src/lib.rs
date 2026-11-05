@@ -95,6 +95,7 @@ pub fn run() {
             commands::get_stash_file_diff,
             commands::get_commit_details,
             commands::get_commit_file_diff,
+            commands::open_commit_file_in_codeshark,
             commands::get_branch_comparison,
             commands::get_branch_comparison_file_diff,
             commands::list_tags,

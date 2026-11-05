@@ -65,7 +65,13 @@ export const ChumFrenzyOverlay: React.FC = () => {
     }
 
     const loop = (currentTime: number) => {
+      const prevTime = lastTimeRef.current || currentTime;
+      const elapsedMs = currentTime - prevTime;
       lastTimeRef.current = currentTime;
+
+      // Delta time normalized to 60 FPS (16.667ms = 1.0)
+      // Clamped to [0.1, 2.5] to prevent sudden jumps on tab switch / lag spikes
+      const dt = Math.min(Math.max(elapsedMs / 16.667, 0.1), 2.5);
 
       updateFrenzyState((state) => {
         const { chumPieces: currentChum, sharks: currentSharks } = state;
@@ -83,16 +89,17 @@ export const ChumFrenzyOverlay: React.FC = () => {
           if (chum.eaten) continue;
 
           // Water drag gently reduces burst velocity, while driftX maintains ongoing lateral spread
-          const vx = chum.vx * 0.982;
-          const targetMaxVy = chum.terminalVy || 0.68;
-          const pieceGravity = chum.gravity || 0.014;
-          const vy = Math.min(chum.vy * 0.98 + pieceGravity, targetMaxVy);
+          const drag = Math.pow(0.982, dt);
+          const vx = chum.vx * drag;
+          const targetMaxVy = (chum.terminalVy || 0.68) * 1.35;
+          const pieceGravity = (chum.gravity || 0.014) * dt;
+          const vy = Math.min(chum.vy * Math.pow(0.98, dt) + pieceGravity, targetMaxVy);
           const wobble = Math.sin(chum.wobbleOffset + currentTime * (chum.wobbleSpeed || 0.002)) * 0.7;
 
           // As pieces sink, they continually spread wider across the horizontal width
-          const nx = chum.x + vx + (chum.driftX || 0) * 0.65 + wobble;
-          const ny = chum.y + vy;
-          const nRot = chum.rotation + chum.vRot;
+          const nx = chum.x + (vx + (chum.driftX || 0) * 0.65 + wobble) * dt;
+          const ny = chum.y + vy * dt;
+          const nRot = chum.rotation + (chum.vRot || 0) * dt;
 
           // Keep within reasonable bounds with soft bouncing off side edges
           let clampedX = nx;
@@ -203,7 +210,7 @@ export const ChumFrenzyOverlay: React.FC = () => {
               addChompSplash(targetChum.x, targetChum.y, shark.glowColor);
               desiredSpeed = maxSpeed * 1.25; // brief surge
             } else {
-              desiredSpeed = Math.min(speed + 0.06, maxSpeed * 0.9);
+              desiredSpeed = Math.min(speed + 0.12 * dt, maxSpeed * 0.95);
             }
           } else {
             // No chum left: swim outward off-screen, fanning out in diverse exit paths
@@ -213,7 +220,7 @@ export const ChumFrenzyOverlay: React.FC = () => {
             const steerX = Math.cos(baseAngle + verticalExitOffset) + sepDx * 1.2;
             const steerY = Math.sin(baseAngle + verticalExitOffset) + sepDy * 1.2;
             targetAngle = Math.atan2(steerY, steerX);
-            desiredSpeed = maxSpeed * 0.9;
+            desiredSpeed = maxSpeed * 0.92;
           }
 
           // Add natural sinuous swimming undulation
@@ -221,21 +228,21 @@ export const ChumFrenzyOverlay: React.FC = () => {
           const weave = Math.sin(currentTime * 0.0032 + phase) * 0.12;
           const adjustedTargetAngle = targetAngle + weave;
 
-          // Smooth turning towards target angle with predator agility
+          // Smooth turning towards target angle with predator agility scaled by dt
           let angleDiff = adjustedTargetAngle - angle;
           while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-          const turnRate = shark.turnSpeed ?? 0.052;
-          angle += angleDiff * turnRate;
+          const turnRate = (shark.turnSpeed ?? 0.052) * dt;
+          angle += angleDiff * Math.min(turnRate, 1.0);
 
-          // Move forward along heading
-          x += Math.cos(angle) * desiredSpeed;
-          y += Math.sin(angle) * desiredSpeed;
+          // Move forward along heading scaled by dt
+          x += Math.cos(angle) * desiredSpeed * dt;
+          y += Math.sin(angle) * desiredSpeed * dt;
 
           // Decay chomp animation
           if (chompAnim > 0) {
-            chompAnim--;
+            chompAnim = Math.max(0, chompAnim - dt);
           }
 
           // Keep shark alive if still on screen or chum exists
@@ -291,7 +298,7 @@ export const ChumFrenzyOverlay: React.FC = () => {
               width: `${chum.size}px`,
               height: `${chum.size}px`,
             }}
-            className="absolute flex items-center justify-center transition-transform duration-75 will-change-transform drop-shadow-[0_4px_10px_rgba(239,68,68,0.5)]"
+            className="absolute flex items-center justify-center will-change-transform drop-shadow-[0_4px_10px_rgba(239,68,68,0.5)]"
           >
             <span className="text-xl select-none leading-none filter drop-shadow">
               {CHUM_EMOJIS[chum.type] || "🐟"}
@@ -315,7 +322,7 @@ export const ChumFrenzyOverlay: React.FC = () => {
               width: `${shark.size}px`,
               height: `${shark.size * 0.9}px`,
             }}
-            className="absolute flex items-center justify-center pointer-events-none transition-transform duration-75 will-change-transform"
+            className="absolute flex items-center justify-center pointer-events-none will-change-transform"
           >
             {/* Glowing predator trail */}
             <div

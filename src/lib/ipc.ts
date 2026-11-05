@@ -1233,6 +1233,27 @@ export async function getCommitFileDiffIpc(
 }
 
 /**
+ * Open a file from a specific commit in CodeShark IDE.
+ * If the file is not directly accessible, exports a snapshot of the commit's blob and opens it.
+ */
+export async function openCommitFileInCodeSharkIpc(
+  repoId: string,
+  commitSha: string,
+  filePath: string
+): Promise<string> {
+  if (!isTauriEnvironment()) {
+    console.info("[Mock] open_commit_file_in_codeshark:", { repoId, commitSha, filePath });
+    await launchOrFocusCodeShark(filePath);
+    return filePath;
+  }
+  return await invoke<string>("open_commit_file_in_codeshark", {
+    repoId,
+    commitSha,
+    filePath,
+  });
+}
+
+/**
  * Compare two branches (e.g. main vs feature branch for PR View)
  */
 export async function getBranchComparisonIpc(
