@@ -122,14 +122,26 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
     const startY = e.clientY;
     const startHeight = inspectorHeight;
 
+    let rafId: number | null = null;
+    let latestHeight = startHeight;
+
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const delta = startY - moveEvent.clientY;
       const maxHeight = Math.round(window.innerHeight * 0.85);
-      const newHeight = Math.min(Math.max(startHeight + delta, 160), maxHeight);
-      setInspectorHeight(newHeight);
+      latestHeight = Math.min(Math.max(startHeight + delta, 160), maxHeight);
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          setInspectorHeight(latestHeight);
+        });
+      }
     };
 
     const handleMouseUp = (upEvent: MouseEvent) => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       setIsResizingHeight(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
@@ -138,7 +150,9 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
       const delta = startY - upEvent.clientY;
       const maxHeight = Math.round(window.innerHeight * 0.85);
       const finalHeight = Math.min(Math.max(startHeight + delta, 160), maxHeight);
+      setInspectorHeight(finalHeight);
       localStorage.setItem("gitshark_commit_inspector_height", String(finalHeight));
+      window.dispatchEvent(new Event("resize"));
     };
 
     document.body.style.cursor = "row-resize";
@@ -150,6 +164,7 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
   const handleResetHeight = () => {
     setInspectorHeight(288);
     localStorage.setItem("gitshark_commit_inspector_height", "288");
+    window.dispatchEvent(new Event("resize"));
   };
 
   // Horizontal left column width resizing
@@ -335,6 +350,7 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
       style={{
         height: isExpanded ? "65vh" : `${inspectorHeight}px`,
       }}
+      onTransitionEnd={() => window.dispatchEvent(new Event("resize"))}
       className={`border-t border-shark-800 bg-shark-900/95 flex flex-col text-xs select-none z-10 relative flex-shrink-0 ${
         isResizingHeight ? "" : "transition-[height] duration-200"
       }`}

@@ -939,7 +939,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
                 {localBranches.length > 10 && (
                   <button
                     onClick={() => setShowAllLocal((prev) => !prev)}
-                    className="w-full flex items-center justify-center gap-1.5 py-1 px-2 mt-1 rounded text-[11px] font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-950/40 border border-dashed border-sky-850 hover:border-sky-700/60 transition-all select-none"
+                    className="w-full flex items-center justify-center gap-1.5 py-1 px-2 mt-1 rounded text-[11px] font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-950/40 border border-dashed border-sky-900/60 hover:border-sky-700/60 transition-all select-none"
                   >
                     {showAllLocal ? (
                       <>

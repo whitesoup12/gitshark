@@ -455,7 +455,7 @@ export const MainViewport: React.FC<MainViewportProps> = ({ tab }) => {
             )}
 
             {/* Virtualized Canvas Rendering Engine */}
-            <div className="flex-1 flex flex-col overflow-hidden relative">
+            <div className="flex-1 flex flex-col overflow-hidden relative min-h-0">
               <CommitGraphCanvas
                 commits={displayedCommits}
                 selectedCommitHash={tab.selectedCommitHash}

@@ -31,6 +31,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
   isLoading = false,
   pullRequests,
 }) => {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -54,34 +55,62 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
     if (!container) return;
 
     const targetY = scrollToRowIndex * ROW_HEIGHT;
+    const currentHeight = wrapperRef.current?.clientHeight || viewportHeight;
     const centeredScrollTop = Math.max(
       0,
-      targetY - viewportHeight / 2 + ROW_HEIGHT / 2
+      targetY - currentHeight / 2 + ROW_HEIGHT / 2
     );
     container.scrollTo({ top: centeredScrollTop, behavior: "smooth" });
-  }, [scrollToRowIndex, viewportHeight]);
+  }, [scrollToRowIndex]);
 
-  // Track container dimensions via ResizeObserver
+  const canvasRenderHeight = viewportHeight + 400;
+
+  // Track container dimensions via ResizeObserver and window resize
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const target = wrapperRef.current || containerRef.current;
+    if (!target) return;
 
-    if (container.clientWidth > 0 && container.clientHeight > 0) {
-      setViewportWidth(container.clientWidth);
-      setViewportHeight(container.clientHeight);
-    }
+    let rafId: number | null = null;
+
+    const updateDimensions = (width?: number, height?: number) => {
+      const w = width ?? target.clientWidth;
+      const h = height ?? target.clientHeight;
+      if (w > 0 && h > 0) {
+        setViewportWidth((prev) => (Math.abs(prev - w) >= 1 ? w : prev));
+        setViewportHeight((prev) => (Math.abs(prev - h) >= 1 ? h : prev));
+      }
+      if (containerRef.current) {
+        const currentScroll = containerRef.current.scrollTop;
+        setScrollTop((prev) => (prev !== currentScroll ? currentScroll : prev));
+      }
+    };
+
+    updateDimensions();
 
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-          setViewportHeight(entry.contentRect.height);
-          setViewportWidth(entry.contentRect.width);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        for (const entry of entries) {
+          if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+            updateDimensions(entry.contentRect.width, entry.contentRect.height);
+          }
         }
-      }
+      });
     });
 
-    observer.observe(container);
-    return () => observer.disconnect();
+    observer.observe(target);
+
+    const handleWindowResize = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => updateDimensions());
+    };
+    window.addEventListener("resize", handleWindowResize);
+
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      observer.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+    };
   }, []);
 
 
@@ -99,15 +128,19 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(viewportWidth * dpr);
-    canvas.height = Math.floor(viewportHeight * dpr);
+    const targetWidth = Math.floor(viewportWidth * dpr);
+    const targetHeight = Math.floor(canvasRenderHeight * dpr);
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+    }
 
     ctx.save();
     ctx.scale(dpr, dpr);
 
     // Dark canvas background
     ctx.fillStyle = "#090d16";
-    ctx.fillRect(0, 0, viewportWidth, viewportHeight);
+    ctx.fillRect(0, 0, viewportWidth, canvasRenderHeight);
 
     const totalRows = commits.length;
     if (totalRows === 0) {
@@ -121,7 +154,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
     );
     const endIndex = Math.min(
       totalRows - 1,
-      Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
+      Math.ceil((scrollTop + canvasRenderHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
     );
 
     // 1. Draw row background stripes & selection/hover/search-match highlights
@@ -370,6 +403,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
     scrollTop,
     viewportHeight,
     viewportWidth,
+    canvasRenderHeight,
     hoveredRow,
     selectedCommitHash,
     matchedCommitHashes,
@@ -445,7 +479,8 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
 
   return (
     <div
-      className="flex-1 w-full h-full relative overflow-hidden select-none cursor-default"
+      ref={wrapperRef}
+      className="flex-1 w-full h-full relative overflow-hidden select-none cursor-default min-h-0"
       style={{ backgroundColor: "#090d16" }}
     >
       {/* High-Performance Canvas docked at (0,0) */}
@@ -454,7 +489,7 @@ export const CommitGraphCanvas: React.FC<CommitGraphCanvasProps> = ({
         className="absolute top-0 left-0 pointer-events-none"
         style={{
           width: `${viewportWidth}px`,
-          height: `${viewportHeight}px`,
+          height: `${canvasRenderHeight}px`,
         }}
       />
 
