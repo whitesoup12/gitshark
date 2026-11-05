@@ -6,6 +6,13 @@ export interface GitBinaryInfo {
   is_valid: boolean;
 }
 
+export interface SystemArchInfo {
+  binary_arch: string;
+  is_rosetta: boolean;
+  is_arm_hardware: boolean;
+  is_arch_mismatch: boolean;
+}
+
 export type SettingsTab = "git" | "terminal" | "appearance" | "about";
 
 export type DiffRefreshDelayOption = 500 | 1000 | 1500 | 2500 | 4000;

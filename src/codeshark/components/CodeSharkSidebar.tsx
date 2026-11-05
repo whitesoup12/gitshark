@@ -10,6 +10,7 @@ import {
   Files,
   FileCode,
   Search,
+  Loader2,
 } from "lucide-react";
 import { useCodeSharkStore } from "../store/useCodeSharkStore";
 import { FileTreeItem } from "./FileTreeItem";
@@ -41,6 +42,8 @@ export const CodeSharkSidebar: React.FC = () => {
     sidebarTab,
     setSidebarTab,
     searchResults,
+    isLoadingTarget,
+    loadingTargetName,
   } = useCodeSharkStore();
 
   const [isResizing, setIsResizing] = useState(false);
@@ -264,16 +267,24 @@ export const CodeSharkSidebar: React.FC = () => {
 
           {/* Multi-Root Projects Section */}
           {projects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-6 text-center text-shark-400 space-y-3">
-              <Folder className="w-8 h-8 text-shark-500 opacity-60" />
-              <div className="text-xs">No project folders open in CodeShark</div>
-              <button
-                onClick={handleAddFolder}
-                className="px-3 py-1.5 text-xs rounded bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-500/30 transition-colors"
-              >
-                Add Folder...
-              </button>
-            </div>
+            isLoadingTarget ? (
+              <div className="flex flex-col items-center justify-center p-6 text-center text-shark-400 space-y-3">
+                <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
+                <div className="text-xs text-shark-300">Loading {loadingTargetName || "workspace"}...</div>
+                <div className="text-[10px] text-shark-500">Reading directory entries</div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-6 text-center text-shark-400 space-y-3">
+                <Folder className="w-8 h-8 text-shark-500 opacity-60" />
+                <div className="text-xs">No project folders open in CodeShark</div>
+                <button
+                  onClick={handleAddFolder}
+                  className="px-3 py-1.5 text-xs rounded bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-500/30 transition-colors"
+                >
+                  Add Folder...
+                </button>
+              </div>
+            )
           ) : (
             <div className="py-1">
               {projects.map((project) => {

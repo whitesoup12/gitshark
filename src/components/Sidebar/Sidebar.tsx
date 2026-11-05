@@ -69,6 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
     openRepoInBrowser,
     removeWorktree,
     fetchWorktrees,
+    toggleHookSkipped,
   } = useWorkspaceStore();
 
   const openSettings = useSettingsStore((s) => s.openSettings);
@@ -1203,31 +1204,80 @@ export const Sidebar: React.FC<SidebarProps> = ({ tab }) => {
               </button>
               {sectionsOpen.hooks && (
                 <div className="mt-1 space-y-1 pl-3">
-                  {tab.hooksInfo.active_hooks.map((h) => (
-                    <div
-                      key={h.name}
-                      className="group flex items-center justify-between px-2 py-1 rounded text-[11px] bg-shark-850/80 border border-shark-750/60 hover:border-shark-700 transition-colors"
-                      title={h.path}
-                    >
-                      <div className="flex items-center gap-1.5 truncate mr-2">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-                        <span className="font-mono text-slate-200 truncate">{h.name}</span>
+                  {tab.hooksInfo.active_hooks.map((h) => {
+                    const isSkipped = !!tab.disabledHooks?.[h.name];
+                    const isEnabled = !isSkipped;
+                    return (
+                      <div
+                        key={h.name}
+                        className={`group flex items-center justify-between px-2 py-1 rounded text-[11px] border transition-colors ${
+                          isEnabled
+                            ? "bg-shark-850/80 border-shark-750/60 hover:border-shark-700"
+                            : "bg-amber-950/20 border-amber-800/40 hover:border-amber-700/50"
+                        }`}
+                        title={
+                          isSkipped
+                            ? `'${h.name}' is toggled OFF and will be skipped on next commit/push (resets to ON afterwards)`
+                            : h.path
+                        }
+                      >
+                        <div className="flex items-center gap-1.5 truncate mr-2">
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                              isEnabled ? "bg-emerald-400" : "bg-amber-400"
+                            }`}
+                          />
+                          <span
+                            className={`font-mono truncate ${
+                              isEnabled ? "text-slate-200" : "text-amber-200/90 line-through"
+                            }`}
+                          >
+                            {h.name}
+                          </span>
+                          {isSkipped && (
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-amber-950/70 border border-amber-700/60 text-amber-300 font-sans font-medium uppercase tracking-wider">
+                              skip
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            onClick={() => executeHookDryRun(tab.id, h.name)}
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-sky-950/80 hover:bg-sky-900 border border-sky-800/60 hover:border-sky-700 text-sky-300 font-mono transition-colors shadow-sm"
+                            title={`Dry-run '${h.name}' hook directly in terminal`}
+                          >
+                            <Play className="w-2.5 h-2.5 fill-current" />
+                            <span>Dry Run</span>
+                          </button>
+
+                          {/* Hook Active / Skip Toggle Button */}
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={isEnabled}
+                            onClick={() => toggleHookSkipped(tab.id, h.name)}
+                            className={`relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              isEnabled
+                                ? "bg-emerald-600 hover:bg-emerald-500"
+                                : "bg-shark-750 hover:bg-shark-700 border-shark-650"
+                            }`}
+                            title={
+                              isEnabled
+                                ? `'${h.name}' is ON. Click to toggle OFF to skip on next run (auto-resets to ON afterwards)`
+                                : `'${h.name}' is OFF and will be skipped on next run. Click to re-enable.`
+                            }
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                isEnabled ? "translate-x-3" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <button
-                          onClick={() => executeHookDryRun(tab.id, h.name)}
-                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-sky-950/80 hover:bg-sky-900 border border-sky-800/60 hover:border-sky-700 text-sky-300 font-mono transition-colors shadow-sm"
-                          title={`Dry-run '${h.name}' hook directly in terminal`}
-                        >
-                          <Play className="w-2.5 h-2.5 fill-current" />
-                          <span>Dry Run</span>
-                        </button>
-                        <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono">
-                          active
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

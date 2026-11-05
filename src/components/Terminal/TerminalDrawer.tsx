@@ -19,7 +19,14 @@ import {
   Minimize2,
   Copy,
   Check,
+  AlertTriangle,
 } from "lucide-react";
+
+interface TerminalDiagnostic {
+  title: string;
+  description: string;
+  fixSnippet?: string;
+}
 
 interface TerminalDrawerProps {
   tab: Tab;
@@ -30,9 +37,12 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const outputBufferRef = useRef<string>("");
   const [isRunning, setIsRunning] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedSnippet, setCopiedSnippet] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<TerminalDiagnostic | null>(null);
 
   // Terminal height resizing with persistence
   const [terminalHeight, setTerminalHeight] = useState<number>(() => {
@@ -203,6 +213,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
     listenToTerminalData(repoId, (chunk) => {
       setIsRunning(true);
       term.write(chunk);
+      outputBufferRef.current = (outputBufferRef.current + chunk).slice(-15000);
     }).then((unlisten) => {
       unlistenData = unlisten;
     });
@@ -212,6 +223,36 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
       term.writeln(
         `\r\n\x1b[90m[Process exited with code ${payload.exit_code ?? 0}]\x1b[0m\r\n`
       );
+
+      // Scan terminal output for known architecture / environment mismatches
+      if (!payload.success) {
+        const text = outputBufferRef.current;
+        if (
+          text.includes("Missing Platform Dependency") ||
+          text.includes("The Nx CLI could not find or load the native binary") ||
+          (text.includes("darwin-x64") && text.includes("darwin-arm64")) ||
+          (text.includes("darwin-x64") && text.includes("husky"))
+        ) {
+          setDiagnostic({
+            title: "Nx Architecture / Platform Mismatch Detected",
+            description:
+              "Nx failed to find the darwin-x64 binary. On Apple Silicon Macs, this occurs when running under Rosetta (x64) emulation or if PATH resolved to an x86 Node.js runtime instead of native ARM64.",
+            fixSnippet: "npm install --save-optional @nx/nx-darwin-x64",
+          });
+        } else if (text.toLowerCase().includes("bad cpu type in executable")) {
+          setDiagnostic({
+            title: "Architecture Incompatibility (Bad CPU Type)",
+            description:
+              "A binary executed in this hook was compiled for a different architecture than the host process.",
+          });
+        } else if (text.includes("pre-push hook exited with code")) {
+          setDiagnostic({
+            title: "Pre-Push Hook Error",
+            description:
+              "The Git pre-push hook exited with an error code.",
+          });
+        }
+      }
     }).then((unlisten) => {
       unlistenExit = unlisten;
     });
@@ -230,6 +271,18 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
 
   const handleClear = () => {
     terminalInstanceRef.current?.clear();
+    outputBufferRef.current = "";
+    setDiagnostic(null);
+  };
+
+  const handleCopySnippet = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSnippet(true);
+      setTimeout(() => setCopiedSnippet(false), 2000);
+    } catch (e) {
+      console.warn("Failed to copy fix snippet:", e);
+    }
   };
 
   const handleCopyOutput = async () => {
@@ -374,6 +427,51 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ tab, onClose }) 
 
       {/* Hook Status & Orchestration Banner */}
       <HookStatusPanel tab={tab} />
+
+      {/* Intelligent Environment & Architecture Diagnostic Banner */}
+      {diagnostic && (
+        <div className="flex items-center justify-between gap-3 px-3 py-2 bg-amber-950/80 border-b border-amber-800/70 text-xs text-amber-200 select-none">
+          <div className="flex items-start gap-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-semibold text-amber-300">
+                {diagnostic.title}
+              </div>
+              <div className="text-[11px] text-amber-200/90 leading-tight mt-0.5">
+                {diagnostic.description}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {diagnostic.fixSnippet && (
+              <button
+                onClick={() => handleCopySnippet(diagnostic.fixSnippet!)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-amber-900/60 hover:bg-amber-800/70 border border-amber-700/60 text-amber-100 transition-colors"
+                title="Copy suggested install fix to clipboard"
+              >
+                {copiedSnippet ? (
+                  <>
+                    <Check className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-2.5 h-2.5 text-amber-300" />
+                    <span>Copy Fix</span>
+                  </>
+                )}
+              </button>
+            )}
+            <button
+              onClick={() => setDiagnostic(null)}
+              className="p-1 rounded text-amber-400 hover:text-amber-200 hover:bg-amber-900/40 transition-colors ml-1"
+              title="Dismiss diagnostic banner"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Terminal Viewport */}
       <div ref={containerRef} className="flex-1 w-full overflow-hidden bg-shark-950" />

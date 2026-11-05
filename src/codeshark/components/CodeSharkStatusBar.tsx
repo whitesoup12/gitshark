@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { CheckCircle2, AlertCircle, GitBranch, Sparkles, Palette, Check } from "lucide-react";
+import { CheckCircle2, AlertCircle, GitBranch, Sparkles, Palette, Check, Loader2 } from "lucide-react";
 import { useCodeSharkStore } from "../store/useCodeSharkStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { THEMES } from "@/lib/theme";
@@ -16,6 +16,8 @@ export const CodeSharkStatusBar: React.FC = () => {
     projectGitStatus,
     quietLinting,
     toggleQuietLinting,
+    isLoadingTarget,
+    loadingTargetName,
   } = useCodeSharkStore();
 
   const { currentTheme, setTheme } = useSettingsStore();
@@ -54,7 +56,12 @@ export const CodeSharkStatusBar: React.FC = () => {
     <footer className="relative flex items-center justify-between h-6 px-3 bg-shark-950 border-t border-shark-800 text-shark-300 text-[11px] select-none shrink-0 font-mono">
       {/* Left Status */}
       <div className="flex items-center space-x-3 truncate">
-        {statusMessage ? (
+        {isLoadingTarget ? (
+          <span className="flex items-center space-x-1.5 text-cyan-300">
+            <Loader2 className="w-3 h-3 animate-spin text-cyan-400 shrink-0" />
+            <span className="truncate">Loading {loadingTargetName || "workspace"}...</span>
+          </span>
+        ) : statusMessage ? (
           <span className="flex items-center space-x-1 text-cyan-200">
             {statusMessage.startsWith("Error") ? (
               <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />

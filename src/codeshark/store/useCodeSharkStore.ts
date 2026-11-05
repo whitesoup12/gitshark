@@ -38,6 +38,26 @@ const getInitialQuietLinting = (): boolean => {
   return true; // Default to true: clean syntax without squigglies/linting
 };
 
+const getInitialLoadingTarget = (): { isLoading: boolean; name: string | null } => {
+  try {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const init = urlParams.get("initPath") || hashParams.get("initPath");
+      if (init) {
+        const clean = decodeURIComponent(init);
+        const name = clean.split(/[/\\]/).filter(Boolean).pop() || "workspace";
+        return { isLoading: true, name };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { isLoading: false, name: null };
+};
+
+const initialLoading = getInitialLoadingTarget();
+
 function getParentDir(pathStr: string): string {
   const norm = normalizePath(pathStr);
   const lastSlash = norm.lastIndexOf("/");
@@ -66,6 +86,9 @@ interface CodeSharkState {
   sidebarOpen: boolean;
   sidebarWidth: number;
   isSaving: boolean;
+  isLoadingTarget: boolean;
+  loadingTargetName: string | null;
+  setIsLoadingTarget: (loading: boolean, name?: string | null) => void;
   statusMessage: string | null;
   cursorPos: { line: number; col: number };
 
@@ -175,6 +198,10 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
   sidebarOpen: true,
   sidebarWidth: 280,
   isSaving: false,
+  isLoadingTarget: initialLoading.isLoading,
+  loadingTargetName: initialLoading.name,
+  setIsLoadingTarget: (loading, name = null) =>
+    set({ isLoadingTarget: loading, loadingTargetName: name }),
   statusMessage: null,
   cursorPos: { line: 1, col: 1 },
 
@@ -538,13 +565,26 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
   },
 
   initFromPath: async (targetPath?: string) => {
-    if (!targetPath || targetPath.trim().length === 0) return;
-    await get().openTarget(targetPath.trim());
+    if (!targetPath || targetPath.trim().length === 0) {
+      set({ isLoadingTarget: false, loadingTargetName: null });
+      return;
+    }
+    const clean = targetPath.trim();
+    const name = clean.split(/[/\\]/).filter(Boolean).pop() || "workspace";
+    set({ isLoadingTarget: true, loadingTargetName: name });
+    try {
+      await get().openTarget(clean);
+    } finally {
+      set({ isLoadingTarget: false, loadingTargetName: null });
+    }
   },
 
   openTarget: async (targetPath: string) => {
+    const clean = targetPath.trim();
+    const name = clean.split(/[/\\]/).filter(Boolean).pop() || "workspace";
+    set({ isLoadingTarget: true, loadingTargetName: name });
     try {
-      const normalized = normalizePath(targetPath);
+      const normalized = normalizePath(clean);
       const info = await getPathInfoIpc(normalized);
 
       if (!info.exists) {
@@ -581,6 +621,8 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
     } catch (err) {
       console.error("Failed to open target in CodeShark:", err);
       set({ statusMessage: `Failed to open: ${String(err)}` });
+    } finally {
+      set({ isLoadingTarget: false, loadingTargetName: null });
     }
   },
 
@@ -597,21 +639,26 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
 
     const parts = norm.split("/");
     const name = parts[parts.length - 1] || norm;
-    const newProject: ProjectRoot = {
-      id: `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name,
-      path: dirPath,
-      isExpanded: true,
-    };
+    set({ isLoadingTarget: true, loadingTargetName: name });
+    try {
+      const newProject: ProjectRoot = {
+        id: `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        name,
+        path: dirPath,
+        isExpanded: true,
+      };
 
-    set((state) => ({
-      projects: [...state.projects, newProject],
-      expandedFolders: { ...state.expandedFolders, [norm]: true },
-      statusMessage: `Added project '${name}' to workspace`,
-    }));
+      set((state) => ({
+        projects: [...state.projects, newProject],
+        expandedFolders: { ...state.expandedFolders, [norm]: true },
+        statusMessage: `Added project '${name}' to workspace`,
+      }));
 
-    await get().loadFolderEntries(dirPath);
-    await get().refreshGitStatus(newProject.id);
+      await get().loadFolderEntries(dirPath);
+      await get().refreshGitStatus(newProject.id);
+    } finally {
+      set({ isLoadingTarget: false, loadingTargetName: null });
+    }
   },
 
   removeProject: (projectId: string) => {
@@ -679,8 +726,9 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
     }
     inFlightOpeningFiles.add(norm);
 
+    const fileName = name || norm.split("/").pop() || "untitled";
+    set({ isLoadingTarget: true, loadingTargetName: fileName });
     try {
-      const fileName = name || norm.split("/").pop() || "untitled";
       const content = await readTextFileIpc(filePath);
       const language = detectLanguageByFilename(fileName);
 
@@ -731,6 +779,7 @@ export const useCodeSharkStore = create<CodeSharkState>((set, get) => ({
       set({ statusMessage: `Failed to open file: ${String(err)}` });
     } finally {
       inFlightOpeningFiles.delete(norm);
+      set({ isLoadingTarget: false, loadingTargetName: null });
     }
   },
 

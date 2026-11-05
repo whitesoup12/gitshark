@@ -152,15 +152,15 @@ export const useChumStore = create<ChumState>((set, get) => ({
           y: window.innerHeight * 0.45,
           angle: 0.1,
           targetAngle: 0.1,
-          speed: 2.8,
-          maxSpeed: 4.5,
+          speed: 4.8,
+          maxSpeed: 7.5,
           size: 240,
           glowColor: "#ffd700",
           chompAnim: 0,
           targetChumId: null,
           state: "hunting",
           swimPhase: Math.random() * Math.PI * 2,
-          turnSpeed: 0.042,
+          turnSpeed: 0.046,
           separationWeight: 1.8,
         });
       }
@@ -190,22 +190,22 @@ export const useChumStore = create<ChumState>((set, get) => ({
           y: Math.max(80, Math.min(window.innerHeight - 80, startY)),
           angle: initialAngle,
           targetAngle: initialAngle,
-          speed: Math.random() * 0.8 + 2.2, // varied cruising speed
-          maxSpeed: Math.random() * 1.2 + 3.6, // varied top speed
+          speed: Math.random() * 1.2 + 3.8, // calibrated baseline cruising speed
+          maxSpeed: Math.random() * 1.8 + 6.2, // calibrated predatory pursuit speed
           size: Math.floor(Math.random() * 50) + 140, // 140px to 190px
           glowColor: SHARK_COLORS[Math.floor(Math.random() * SHARK_COLORS.length)],
           chompAnim: 0,
           targetChumId: null,
           state: "hunting",
           swimPhase: Math.random() * Math.PI * 2,
-          turnSpeed: Math.random() * 0.02 + 0.048,
+          turnSpeed: Math.random() * 0.02 + 0.054,
           separationWeight: Math.random() * 0.4 + 1.3,
         });
         spawnIndex++;
       }
 
       set({ sharks: newSharks });
-    }, 2000);
+    }, 1300);
   },
 
   updateFrenzyState: (updater) => {

@@ -2586,6 +2586,50 @@ pub fn get_commit_file_diff(
     parse_git2_diff(&diff, clean_path)
 }
 
+/// Retrieve raw file content and binary detection for a given file at a specific commit.
+/// If the file was deleted in this commit, falls back to parent commit so historical content is accessible.
+pub fn get_commit_file_content(
+    repo: &Repository,
+    commit_sha: &str,
+    target_path: &str,
+) -> Result<(Vec<u8>, bool), String> {
+    let oid = git2::Oid::from_str(commit_sha.trim())
+        .map_err(|e| format!("Invalid commit SHA '{commit_sha}': {e}"))?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit not found: {e}"))?;
+    let tree = commit
+        .tree()
+        .map_err(|e| format!("Failed to get commit tree: {e}"))?;
+
+    let clean_path = target_path.replace('\\', "/");
+    let clean_path = clean_path.trim_start_matches('/');
+
+    let entry_opt = tree.get_path(std::path::Path::new(clean_path)).ok().or_else(|| {
+        if commit.parent_count() > 0 {
+            commit.parent(0).ok().and_then(|p| p.tree().ok()).and_then(|pt| {
+                pt.get_path(std::path::Path::new(clean_path)).ok()
+            })
+        } else {
+            None
+        }
+    });
+
+    let entry = entry_opt.ok_or_else(|| {
+        format!("Path '{clean_path}' not found in commit {commit_sha} or its parent")
+    })?;
+
+    let object = entry
+        .to_object(repo)
+        .map_err(|e| format!("Failed to read object for '{clean_path}': {e}"))?;
+    let blob = object
+        .as_blob()
+        .ok_or_else(|| format!("Target '{clean_path}' is not a file/blob"))?;
+
+    let is_bin = blob.is_binary() || blob.content().contains(&0);
+    Ok((blob.content().to_vec(), is_bin))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonCommitItem {
     pub hash: String,
@@ -3570,6 +3614,49 @@ mod tests {
         let uncommitted_diff = get_branch_comparison_file_diff(&repo, "main", "feature/pr-view", "wip.txt", true).unwrap();
         assert_eq!(uncommitted_diff.new_path.as_deref(), Some("wip.txt"));
         assert!(!uncommitted_diff.hunks.is_empty());
+
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn test_get_commit_file_content() {
+        let test_dir = std::env::temp_dir().join(format!("gitshark_content_test_{}", uuid::Uuid::new_v4()));
+        let repo = Repository::init(&test_dir).unwrap();
+        let sig = git2::Signature::now("Tester", "test@gitshark.com").unwrap();
+
+        // 1. Commit initial file
+        let file_path = test_dir.join("sample.txt");
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "First line of sample content").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("sample.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit1_oid = repo.commit(Some("HEAD"), &sig, &sig, "Initial sample", &tree, &[]).unwrap();
+
+        // 2. Modify and commit second version
+        let mut f = File::create(&file_path).unwrap();
+        writeln!(f, "Second version modified line").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("sample.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let parent1 = repo.find_commit(commit1_oid).unwrap();
+        let commit2_oid = repo.commit(Some("HEAD"), &sig, &sig, "Update sample", &tree, &[&parent1]).unwrap();
+
+        // 3. Test get_commit_file_content at commit1
+        let (bytes1, is_bin1) = get_commit_file_content(&repo, &commit1_oid.to_string(), "sample.txt").unwrap();
+        assert!(!is_bin1);
+        assert_eq!(String::from_utf8(bytes1).unwrap().trim(), "First line of sample content");
+
+        // 4. Test get_commit_file_content at commit2
+        let (bytes2, is_bin2) = get_commit_file_content(&repo, &commit2_oid.to_string(), "sample.txt").unwrap();
+        assert!(!is_bin2);
+        assert_eq!(String::from_utf8(bytes2).unwrap().trim(), "Second version modified line");
 
         let _ = fs::remove_dir_all(&test_dir);
     }

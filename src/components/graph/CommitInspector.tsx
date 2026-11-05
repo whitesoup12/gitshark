@@ -19,9 +19,19 @@ import {
   UploadCloud,
   GitPullRequest,
   Undo2,
+  Code,
+  ExternalLink,
 } from "lucide-react";
 import { formatShortHash } from "@/lib/utils";
-import { getCommitDetailsIpc, getCommitFileDiffIpc, openInBrowserIpc } from "@/lib/ipc";
+import {
+  getCommitDetailsIpc,
+  getCommitFileDiffIpc,
+  openInBrowserIpc,
+  openCommitFileInCodeSharkIpc,
+  launchOrFocusCodeShark,
+  getPathInfoIpc,
+} from "@/lib/ipc";
+import { buildSplitDiffRows } from "@/lib/diffUtils";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import { showConfirm } from "@/store/useDialogStore";
 
@@ -40,7 +50,7 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
 }) => {
   const { tabs, activeTabId, createTag, deleteTag, pushTag, executeCherryPick, executeRevert } =
     useWorkspaceStore();
-  const currentTab = tabs.find((t) => t.id === activeTabId);
+  const currentTab = tabs.find((t) => t.id === activeTabId || t.repoId === repoId);
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [details, setDetails] = useState<CommitDetails | null>(null);
@@ -59,6 +69,39 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
   const [fileDiff, setFileDiff] = useState<FileDiff | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
   const [diffViewMode, setDiffViewMode] = useState<"unified" | "split">("unified");
+  const [isOpeningCodeShark, setIsOpeningCodeShark] = useState(false);
+  const [hasWorkspaceFile, setHasWorkspaceFile] = useState(false);
+
+  // Check if current workspace has this file
+  useEffect(() => {
+    if (!selectedFile || !currentTab?.path) {
+      setHasWorkspaceFile(false);
+      return;
+    }
+    const fullPath = `${currentTab.path}/${selectedFile}`.replace(/\/+/g, "/");
+    getPathInfoIpc(fullPath)
+      .then((info) => setHasWorkspaceFile(info.exists))
+      .catch(() => setHasWorkspaceFile(false));
+  }, [selectedFile, currentTab?.path]);
+
+  const handleOpenInCodeShark = async (fromCommit = true) => {
+    if (!selectedFile || isOpeningCodeShark) return;
+    setIsOpeningCodeShark(true);
+    try {
+      if (fromCommit) {
+        await openCommitFileInCodeSharkIpc(repoId, commit.hash, selectedFile);
+      } else {
+        const fullPath = currentTab?.path
+          ? `${currentTab.path}/${selectedFile}`.replace(/\/+/g, "/")
+          : selectedFile;
+        await launchOrFocusCodeShark(fullPath);
+      }
+    } catch (err) {
+      console.error("Failed to open file in CodeShark:", err);
+    } finally {
+      setTimeout(() => setIsOpeningCodeShark(false), 500);
+    }
+  };
 
   // Vertical panel height resizing
   const [inspectorHeight, setInspectorHeight] = useState<number>(() => {
@@ -660,6 +703,33 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
                     Split
                   </button>
                 </div>
+
+                {/* CodeShark Action */}
+                <div className="flex items-center bg-shark-850 rounded border border-shark-750 p-0.5">
+                  <button
+                    onClick={() => handleOpenInCodeShark(true)}
+                    disabled={isOpeningCodeShark}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-300 hover:text-cyan-300 hover:bg-cyan-950/40 disabled:opacity-50 transition-colors"
+                    title={`View ${selectedFile} from commit ${formatShortHash(commit.hash)} in CodeShark IDE`}
+                  >
+                    {isOpeningCodeShark ? (
+                      <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                    ) : (
+                      <Code className="w-3 h-3 text-cyan-400" />
+                    )}
+                    <span>CodeShark</span>
+                  </button>
+                  {hasWorkspaceFile && (
+                    <button
+                      onClick={() => handleOpenInCodeShark(false)}
+                      disabled={isOpeningCodeShark}
+                      className="px-1 py-0.5 rounded text-[10px] text-slate-400 hover:text-cyan-300 hover:bg-cyan-950/40 border-l border-shark-750/70 transition-colors"
+                      title="Open current workspace copy in CodeShark IDE"
+                    >
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -700,41 +770,110 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
                       </div>
 
                       {/* Hunk Lines */}
-                      <div className="overflow-x-auto">
-                        <div className="min-w-full w-fit">
-                          {hunk.lines.map((line, lIdx) => {
-                            const isAdd = line.origin === "+";
-                            const isDel = line.origin === "-";
-                            return (
-                              <div
-                                key={lIdx}
-                                className={`flex items-center leading-5 min-w-full w-fit ${
-                                  isAdd
-                                    ? "bg-emerald-950/30 text-emerald-300"
-                                    : isDel
-                                    ? "bg-rose-950/30 text-rose-300"
-                                    : "text-slate-400"
-                                }`}
-                              >
-                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] flex-shrink-0">
-                                  {line.old_lineno ?? ""}
-                                </span>
-                                <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] flex-shrink-0">
-                                  {line.new_lineno ?? ""}
-                                </span>
-                                <span className="w-5 text-center select-none font-bold flex-shrink-0">
-                                  {line.origin === "+" || line.origin === "-"
-                                    ? line.origin
-                                    : " "}
-                                </span>
-                                <span className="flex-1 pr-3 whitespace-pre">
-                                  {line.content}
-                                </span>
-                              </div>
-                            );
-                          })}
+                      {diffViewMode === "unified" ? (
+                        <div className="overflow-x-auto">
+                          <div className="min-w-full w-fit">
+                            {hunk.lines.map((line, lIdx) => {
+                              const isAdd = line.origin === "+";
+                              const isDel = line.origin === "-";
+                              return (
+                                <div
+                                  key={lIdx}
+                                  className={`flex items-center leading-5 min-w-full w-fit ${
+                                    isAdd
+                                      ? "bg-emerald-950/30 text-emerald-300"
+                                      : isDel
+                                      ? "bg-rose-950/30 text-rose-300"
+                                      : "text-slate-400"
+                                  }`}
+                                >
+                                  <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] flex-shrink-0">
+                                    {line.old_lineno ?? ""}
+                                  </span>
+                                  <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] flex-shrink-0">
+                                    {line.new_lineno ?? ""}
+                                  </span>
+                                  <span className="w-5 text-center select-none font-bold flex-shrink-0">
+                                    {line.origin === "+" || line.origin === "-"
+                                      ? line.origin
+                                      : " "}
+                                  </span>
+                                  <span className="flex-1 pr-3 whitespace-pre">
+                                    {line.content}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-full border-collapse">
+                            <colgroup>
+                              <col className="w-1/2" />
+                              <col className="w-1/2" />
+                            </colgroup>
+                            <tbody className="divide-y divide-shark-900/40">
+                              {buildSplitDiffRows(hunk.lines).map((row, rIdx) => {
+                                const leftLine = row.left;
+                                const rightLine = row.right;
+                                const isLeftDel = leftLine?.origin === "-";
+                                const isRightAdd = rightLine?.origin === "+";
+
+                                return (
+                                  <tr key={rIdx} className="leading-5 select-text">
+                                    {/* Left column (Old / Deletion / Context) */}
+                                    <td
+                                      className={`p-0 align-top border-r border-shark-800 ${
+                                        isLeftDel
+                                          ? "bg-rose-950/30 text-rose-300"
+                                          : leftLine
+                                          ? "text-slate-400"
+                                          : "bg-shark-950/50 text-transparent select-none"
+                                      }`}
+                                    >
+                                      <div className="flex items-start min-w-[280px]">
+                                        <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                          {leftLine?.old_lineno ?? ""}
+                                        </span>
+                                        <span className="w-5 text-center font-bold select-none text-rose-400 flex-shrink-0">
+                                          {isLeftDel ? "-" : " "}
+                                        </span>
+                                        <span className="flex-1 pr-3 whitespace-pre">
+                                          {leftLine ? leftLine.content || " " : " "}
+                                        </span>
+                                      </div>
+                                    </td>
+
+                                    {/* Right column (New / Addition / Context) */}
+                                    <td
+                                      className={`p-0 align-top ${
+                                        isRightAdd
+                                          ? "bg-emerald-950/30 text-emerald-300"
+                                          : rightLine
+                                          ? "text-slate-400"
+                                          : "bg-shark-950/50 text-transparent select-none"
+                                      }`}
+                                    >
+                                      <div className="flex items-start min-w-[280px]">
+                                        <span className="w-10 text-right pr-2 text-slate-600 select-none text-[10px] border-r border-shark-800/40 flex-shrink-0">
+                                          {rightLine?.new_lineno ?? ""}
+                                        </span>
+                                        <span className="w-5 text-center font-bold select-none text-emerald-400 flex-shrink-0">
+                                          {isRightAdd ? "+" : " "}
+                                        </span>
+                                        <span className="flex-1 pr-3 whitespace-pre">
+                                          {rightLine ? rightLine.content || " " : " "}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -780,6 +919,18 @@ export const CommitInspector: React.FC<CommitInspectorProps> = ({
                               <span className="text-rose-400">-{file.deletions}</span>
                             )}
                           </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCommitFileInCodeSharkIpc(repoId, commit.hash, file.path).catch((err) =>
+                                console.error("Failed to open commit file in CodeShark:", err)
+                              );
+                            }}
+                            className="p-1 rounded text-slate-500 hover:text-cyan-300 hover:bg-shark-700/60 transition-colors opacity-0 group-hover:opacity-100"
+                            title={`View ${fileName} in CodeShark IDE`}
+                          >
+                            <Code className="w-3.5 h-3.5" />
+                          </button>
                           <span className="text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 hover:text-sky-300 transition-opacity">
                             view diff →
                           </span>

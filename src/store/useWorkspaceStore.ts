@@ -88,7 +88,7 @@ interface WorkspaceState {
   // Hook & Process Orchestration
   fetchRepoHooks: (tabId: string) => Promise<RepoHooksInfo | null>;
   executeHookDryRun: (tabId: string, hookName: string) => Promise<boolean>;
-  executeCommit: (tabId: string, message: string, amend?: boolean) => Promise<boolean>;
+  executeCommit: (tabId: string, message: string, amend?: boolean, noVerify?: boolean) => Promise<boolean>;
   executePush: (
     tabId: string,
     remote?: string,
@@ -96,8 +96,10 @@ interface WorkspaceState {
     force?: boolean,
     setUpstream?: boolean,
     tags?: boolean,
-    followTags?: boolean
+    followTags?: boolean,
+    noVerify?: boolean
   ) => Promise<boolean>;
+  pushWithNoVerify: (tabId: string) => Promise<boolean>;
   executePull: (tabId: string, remote?: string, branch?: string, rebase?: boolean) => Promise<boolean>;
   executeFetch: (tabId: string, remote?: string, prune?: boolean) => Promise<boolean>;
   autoFetchTab: (tabId: string) => Promise<void>;
@@ -113,6 +115,7 @@ interface WorkspaceState {
   cancelActiveProcess: (tabId: string) => Promise<void>;
   retryLastHook: (tabId: string) => Promise<void>;
   dismissHookStatus: (tabId: string) => void;
+  toggleHookSkipped: (tabId: string, hookName: string) => void;
 
   // Milestone 5: Worktrees & Remote Sync
   fetchWorktrees: (tabId: string) => Promise<WorktreeItem[]>;
@@ -483,7 +486,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  executeCommit: async (tabId: string, message: string, amend: boolean = false): Promise<boolean> => {
+  executeCommit: async (
+    tabId: string,
+    message: string,
+    amend: boolean = false,
+    noVerify?: boolean
+  ): Promise<boolean> => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
@@ -500,7 +508,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
     }
 
-    const hasPreCommit = hooksInfo?.has_pre_commit ?? false;
+    const hasCommitHooks = hooksInfo?.has_pre_commit || hooksInfo?.has_commit_msg;
+    // Check if the user toggled off pre-commit or commit-msg in the Git Hooks section
+    const isCommitHookToggledOff =
+      !!tab.disabledHooks?.["pre-commit"] || !!tab.disabledHooks?.["commit-msg"];
+    const effectiveNoVerify = noVerify ?? (hasCommitHooks && isCommitHookToggledOff);
+
+    const hasPreCommit = (hooksInfo?.has_pre_commit ?? false) && !effectiveNoVerify;
     const initialStage: HookStage = hasPreCommit ? "pre-commit" : "committing";
 
     // 2. Open terminal drawer immediately
@@ -544,6 +558,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       let unlistenExitFn: (() => void) | null = null;
 
       const cleanup = () => {
+        // Auto-reset commit hook toggles back to default ON state after commit completes
+        const curTab = get().tabs.find((t) => t.id === tabId);
+        if (curTab?.disabledHooks) {
+          const next = { ...curTab.disabledHooks };
+          delete next["pre-commit"];
+          delete next["commit-msg"];
+          delete next["post-commit"];
+          get().updateTab(tabId, { disabledHooks: next });
+        }
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
@@ -621,7 +644,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }
         });
 
-        await executeGitCommitIpc(repoId, message, amend);
+        await executeGitCommitIpc(repoId, message, amend, effectiveNoVerify);
       } catch (err) {
         if (isDone) return;
         isDone = true;
@@ -652,14 +675,31 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     force: boolean = false,
     setUpstream: boolean = false,
     tags?: boolean,
-    followTags?: boolean
+    followTags?: boolean,
+    noVerify?: boolean
   ): Promise<boolean> => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || !tab.repoId) return false;
 
     const repoId = tab.repoId;
-    const hasPrePush = tab.hooksInfo?.has_pre_push ?? false;
-    const initialStage: HookStage = hasPrePush ? "pre-push" : "pushing";
+
+    // 1. Fetch or use existing hooks info
+    let hooksInfo = tab.hooksInfo;
+    if (!hooksInfo) {
+      try {
+        hooksInfo = await getRepoHooksIpc(repoId);
+        get().updateTab(tabId, { hooksInfo });
+      } catch (e) {
+        console.warn("Failed to query hooks info:", e);
+      }
+    }
+
+    const hasPrePush = hooksInfo?.has_pre_push ?? false;
+    // Check if the user toggled off pre-push in the Git Hooks section
+    const isPrePushToggledOff = !!tab.disabledHooks?.["pre-push"];
+    const effectiveNoVerify = noVerify ?? (hasPrePush && isPrePushToggledOff);
+
+    const initialStage: HookStage = (hasPrePush && !effectiveNoVerify) ? "pre-push" : "pushing";
 
     get().updateTab(tabId, {
       terminalOpen: true,
@@ -698,6 +738,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       let unlistenExitFn: (() => void) | null = null;
 
       const cleanup = () => {
+        // Auto-reset pre-push hook toggle back to default ON state after push completes
+        const curTab = get().tabs.find((t) => t.id === tabId);
+        if (curTab?.disabledHooks) {
+          const next = { ...curTab.disabledHooks };
+          delete next["pre-push"];
+          get().updateTab(tabId, { disabledHooks: next });
+        }
         if (activeTimers.has(tabId)) {
           clearInterval(activeTimers.get(tabId)!);
           activeTimers.delete(tabId);
@@ -758,7 +805,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const pushTagsPref = useSettingsStore.getState().pushTagsOption;
         const effectiveTags = tags ?? (pushTagsPref === "all");
         const effectiveFollowTags = followTags ?? (pushTagsPref === "follow-tags");
-        await executeGitPushIpc(repoId, remote, branch, force, setUpstream, effectiveTags, effectiveFollowTags);
+        await executeGitPushIpc(repoId, remote, branch, force, setUpstream, effectiveTags, effectiveFollowTags, effectiveNoVerify);
       } catch (err) {
         if (isDone) return;
         isDone = true;
@@ -1641,10 +1688,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
+  pushWithNoVerify: async (tabId: string) => {
+    return await get().executePush(tabId, undefined, undefined, false, false, undefined, undefined, true);
+  },
+
   dismissHookStatus: (tabId: string) => {
     get().updateTab(tabId, {
       hookState: undefined,
     });
+  },
+
+  toggleHookSkipped: (tabId: string, hookName: string) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const current = tab.disabledHooks || {};
+    const isCurrentlySkipped = !!current[hookName];
+    const next = { ...current };
+    if (isCurrentlySkipped) {
+      delete next[hookName];
+    } else {
+      next[hookName] = true;
+    }
+    get().updateTab(tabId, { disabledHooks: next });
   },
 
   fetchWorktrees: async (tabId: string) => {

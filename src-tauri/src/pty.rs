@@ -284,10 +284,18 @@ pub fn get_augmented_path() -> std::ffi::OsString {
     // 2. Platform-specific known development binary paths
     #[cfg(not(windows))]
     {
-        // On Unix/macOS, query login shell PATH if available (inherits ~/.zshrc, ~/.bashrc, etc.)
+        // On Unix/macOS, query login shell PATH if available (inherits ~/.zprofile, ~/.zshrc, ~/.bashrc, etc.)
         if let Ok(shell) = std::env::var("SHELL") {
+            let probe_cmd = if shell.ends_with("/zsh") {
+                "if [ -f \"$HOME/.zprofile\" ]; then source \"$HOME/.zprofile\" 2>/dev/null; fi; if [ -f \"$HOME/.zshrc\" ]; then source \"$HOME/.zshrc\" 2>/dev/null; fi; printf \"%s\" \"$PATH\""
+            } else if shell.ends_with("/bash") {
+                "if [ -f \"$HOME/.bash_profile\" ]; then source \"$HOME/.bash_profile\" 2>/dev/null; elif [ -f \"$HOME/.profile\" ]; then source \"$HOME/.profile\" 2>/dev/null; fi; if [ -f \"$HOME/.bashrc\" ]; then source \"$HOME/.bashrc\" 2>/dev/null; fi; printf \"%s\" \"$PATH\""
+            } else {
+                "printf \"%s\" \"$PATH\""
+            };
+
             if let Ok(output) = std::process::Command::new(&shell)
-                .args(["-l", "-c", "printf \"%s\" \"$PATH\""])
+                .args(["-l", "-c", probe_cmd])
                 .output()
             {
                 if output.status.success() {
@@ -301,29 +309,10 @@ pub fn get_augmented_path() -> std::ffi::OsString {
             }
         }
 
-        let unix_system_paths = [
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-            "/usr/local/sbin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-        ];
-        for p in unix_system_paths {
-            let pb = PathBuf::from(p);
-            if pb.is_dir() {
-                add_path(pb);
-            }
-        }
-
+        // Add user-level version manager and tooling directories FIRST so they take
+        // precedence over system or Rosetta-migrated binaries in /usr/local/bin.
         if let Ok(home) = std::env::var("HOME") {
             let home_paths = [
-                // pnpm standard paths
-                format!("{home}/Library/pnpm"),
-                format!("{home}/.local/share/pnpm"),
-                format!("{home}/.pnpm-global/bin"),
                 // Node & version manager paths
                 format!("{home}/.local/share/fnm"),
                 format!("{home}/.fnm/current/bin"),
@@ -332,6 +321,10 @@ pub fn get_augmented_path() -> std::ffi::OsString {
                 format!("{home}/.asdf/bin"),
                 format!("{home}/.local/share/mise/shims"),
                 format!("{home}/.local/share/mise/bin"),
+                // pnpm standard paths
+                format!("{home}/Library/pnpm"),
+                format!("{home}/.local/share/pnpm"),
+                format!("{home}/.pnpm-global/bin"),
                 // Bun, Yarn, Cargo, Local
                 format!("{home}/.bun/bin"),
                 format!("{home}/.yarn/bin"),
@@ -347,17 +340,41 @@ pub fn get_augmented_path() -> std::ffi::OsString {
                 }
             }
 
-            // Also check nvm versions directory (~/.nvm/versions/node/*/bin)
+            // Also check nvm versions directory (~/.nvm/versions/node/*/bin), latest versions first
             let nvm_versions_dir = PathBuf::from(format!("{home}/.nvm/versions/node"));
             if nvm_versions_dir.is_dir() {
                 if let Ok(entries) = std::fs::read_dir(nvm_versions_dir) {
+                    let mut version_dirs: Vec<PathBuf> = Vec::new();
                     for entry in entries.flatten() {
                         let bin_dir = entry.path().join("bin");
                         if bin_dir.is_dir() {
-                            add_path(bin_dir);
+                            version_dirs.push(bin_dir);
                         }
                     }
+                    // Sort descending so newer Node versions take priority
+                    version_dirs.sort_by(|a, b| b.cmp(a));
+                    for bin_dir in version_dirs {
+                        add_path(bin_dir);
+                    }
                 }
+            }
+        }
+
+        // Apple Silicon homebrew (/opt/homebrew) MUST precede Intel (/usr/local)
+        let unix_system_paths = [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ];
+        for p in unix_system_paths {
+            let pb = PathBuf::from(p);
+            if pb.is_dir() {
+                add_path(pb);
             }
         }
     }

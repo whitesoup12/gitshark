@@ -82,6 +82,8 @@ export const CodeSharkEditor: React.FC = () => {
     setSearchQuery,
     executeGlobalSearch,
     openQuickOpen,
+    isLoadingTarget,
+    loadingTargetName,
   } = useCodeSharkStore();
 
   const { currentTheme } = useSettingsStore();
@@ -330,6 +332,34 @@ export const CodeSharkEditor: React.FC = () => {
   };
 
   if (!activeTab) {
+    if (isLoadingTarget) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center bg-shark-950 text-shark-300 p-8 select-none">
+          <div className="flex flex-col items-center max-w-md text-center space-y-5">
+            <div className="relative">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-950/90 to-sky-900/40 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shadow-xl shadow-cyan-950/60">
+                <Code className="w-8 h-8 text-cyan-300 animate-pulse" />
+              </div>
+              <div className="absolute -inset-1 rounded-2xl border-2 border-cyan-400/30 border-t-cyan-400 animate-spin" />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-bold text-white tracking-wide flex items-center justify-center gap-2">
+                <span>Opening {loadingTargetName || "File"}</span>
+              </h2>
+              <p className="text-xs text-shark-400 mt-1 font-mono">
+                Loading workspace and preparing editor...
+              </p>
+            </div>
+
+            <div className="w-48 h-1 bg-shark-900 rounded-full overflow-hidden border border-shark-800">
+              <div className="h-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-500 rounded-full animate-progress-indeterminate w-full" />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-shark-950 text-shark-300 p-8 select-none">
         <div className="flex flex-col items-center max-w-md text-center space-y-4">
@@ -399,6 +429,13 @@ export const CodeSharkEditor: React.FC = () => {
 
   return (
     <div className="flex-1 w-full h-full relative overflow-hidden bg-shark-950">
+      {/* Top indeterminate progress line when switching/loading targets */}
+      {isLoadingTarget && (
+        <div className="absolute top-0 left-0 right-0 z-30 h-0.5 bg-shark-900 overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-500 animate-progress-indeterminate w-full" />
+        </div>
+      )}
+
       {/* Floating In-File Find and Replace Bar */}
       <CodeSharkFindReplaceBar editor={editorRef.current} />
 

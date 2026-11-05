@@ -318,6 +318,22 @@
   animation: chompShockwave 2.4s ease-out forwards;
 }
 
+@keyframes indeterminateProgress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(20%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-progress-indeterminate {
+  animation: indeterminateProgress 1.4s ease-in-out infinite;
+}
+
 /* Hide scrollbars across browsers */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
